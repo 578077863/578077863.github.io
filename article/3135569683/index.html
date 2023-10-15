@@ -1,0 +1,1083 @@
+<!DOCTYPE html>
+<html lang="zh-cn">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, shrink-to-fit=no">
+    <meta name="referrer" content="origin">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta http-equiv="Cache-Control" content="no-transform">
+    <meta http-equiv="Cache-Control" content="no-siteapp">
+    <title>
+        
+            Redis
+        
+    </title>
+    <link rel="shortcut icon" href="#"/>
+
+    <link type="text/css" rel="stylesheet" href="/font/LongCang.css">
+    <link type="text/css" rel="stylesheet" href="/font/Monda.css">
+    <link type="text/css" rel="stylesheet" href="/font/NotoSansSC.css">
+    <link type="text/css" rel="stylesheet" href="/font/NotoSerifSC.css">
+    <link type="text/css" rel="stylesheet" href="/font/Playball.css">
+    <link type="text/css" rel="stylesheet" href="/font/PTMono.css">
+    <link type="text/css" rel="stylesheet" href="/font/Roboto.css">
+    <link type="text/css" rel="stylesheet" href="/font/RobotoSlab.css">
+    <link type="text/css" rel="stylesheet" href="/font/Rosario.css">
+    <link type="text/css" rel="stylesheet" href="/font/UbuntuMono.css">
+
+    <link type="text/css" rel="stylesheet" href="/css/base.css">
+    <link type="text/css" rel="stylesheet" href="/css/code.css">
+
+    <script type="text/javascript" src="/js/jquery-3.4.1.min.js"></script>
+<meta name="generator" content="Hexo 6.3.0"></head>
+<body>
+    <a id="cover"></a>
+    <link type="text/css" rel="stylesheet" href="/css/post.css">
+<div id="header" class="header">
+    <div class="vertical">
+        <div class="inner">
+            
+                <h1 class="header-subtitle">Redis</h1>
+                <div class="header-subinfo">
+                    <p class="article-info-text">
+                        <span>
+                            <i class="iconfont icon-time"></i> 发表时间：2023-10-10
+                        </span>
+                        
+                            
+                                <span id="/article/3135569683/" class="leancloud_visitors" data-flag-title="Redis">
+                                    <i class="iconfont icon-browse"></i> 阅读：<sapn class="leancloud-visitors-count"></span>
+                                </span>
+                            
+                            
+                                <span>
+                                    <i class="iconfont icon-interactive"></i> 评论：<span class="valine-comment-count" data-xid="/article/3135569683/"></span>
+                                </span>
+                              
+                        
+                    </p>
+                    
+                        
+                            <span class="category-color">Redis</span>
+                        
+                    
+                    
+                </div>
+            
+        </div>
+    </div>
+    
+</div>
+<div id="container">
+    
+        <!-- 文章页面 -->
+        <div id="article">
+            <div class="toc"></div>
+            <div class="article-body">
+                <h1 id="Redis-管道、事务、Lua-脚本对比"><a href="#Redis-管道、事务、Lua-脚本对比" class="headerlink" title="Redis 管道、事务、Lua 脚本对比"></a>Redis 管道、事务、Lua 脚本对比</h1><p><code>Redis</code> 提供三种将客户端多条命令打包发送给服务端执行的方式： <code>Pipelining(管道)</code> 、 <code>Transactions(事务)</code> 和 <code>Lua Scripts(Lua 脚本)</code>。本文不会过细的讨论三种方式的基础知识，将从这三种方式的 <code>优势</code> 、 <code>局限性</code> 和 <code>原子性</code> 方面展开讨论	</p>
+<h1 id="Pipelining（管道）"><a href="#Pipelining（管道）" class="headerlink" title="Pipelining（管道）"></a>Pipelining（管道）</h1><p>Redis 管道是三者之中最简单的，当客户端需要执行多条 <code>redis</code> 命令时，可以通过管道一次性将要执行的多条命令发送给服务端，其作用是为了降低 <code>RTT(Round Trip Time)</code> 对性能的影响，比如我们使用 <code>nc</code> 命令将两条指令发送给 <code>redis</code> 服务端	</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta prompt_">$ </span><span class="language-bash"><span class="built_in">printf</span> <span class="string">&quot;INCR x\r\nINCR x\r\n&quot;</span> | nc localhost 6379</span>	</span><br><span class="line">:1	</span><br><span class="line">:2	</span><br><span class="line">复制代码	</span><br></pre></td></tr></table></figure>
+<p>可以看到，管道只是简单的将多个命令拼接在一起，命令之间用换行符（&#x2F;r&#x2F;n）分割，并没有在第一条命令前或最后一条命令后面添加开始&#x2F;结束标志位	</p>
+<p><code>redis</code> 服务端接收到管道发送过来的多条命令后，会一直执命令，并将命令的执行结果进行缓存，直到最后一条命令执行完成，再所有命令的执行结果一次性返回给客户端	</p>
+<h2 id="Pipelining-的优势"><a href="#Pipelining-的优势" class="headerlink" title="Pipelining 的优势"></a>Pipelining 的优势</h2><p>在性能方面， <code>Pipelining</code> 有下面两个优势：	</p>
+<ul>
+<li>将多条命令打包一次性发送给服务端，减少了客户端与服务端之间的网络调用次数，节省了 <code>RTT</code> 	</li>
+<li>避免了上下文切换，当客户端&#x2F;服务端需要从网络中读写数据时，都会产生一次系统调用，系统调用是非常耗时的操作，其中设计到程序由用户态切换到内核态，再从内核态切换回用户态的过程。当我们执行 10 条 <code>redis</code> 命令的时候，就会发生 10 次用户态到内核态的上下文切换，但如果我们使用 <code>Pipeining</code> 将多条命令打包成一条一次性发送给服务端，就只会产生一次上下文切换</li>
+</ul>
+<p>	</p>
+<h2 id="Pipelining-原子性"><a href="#Pipelining-原子性" class="headerlink" title="Pipelining 原子性"></a>Pipelining 原子性</h2><p>我们都知道， <code>redis</code> 执行命令的时候是单线程执行的，所以 <code>redis</code> 中的所有命令都具备原子性，这意味着 <code>redis</code> 并不会在执行某条命令的中途停止去执行另一条命令	</p>
+<p>但是 <code>Pipelining</code> 并不具备原子性，想象一下有两个客户端 <code>client1</code> 和 <code>client2</code> 同时向 <code>redis</code> 服务端发送 <code>Pipelining</code> 命令，每条 <code>Pipelining</code> 包含 5 条 <code>redis</code> 命令。 <code>redis</code> 可以保证 <code>client1</code> 管道中的命令始终是顺序执行的， <code>client2</code> 管道中的命令也是一样，始终按照管道中传入的顺序执行命令	</p>
+<p>但是 <code>redis</code> 并不能保证等 <code>client1</code> 管道中的所有命令执行完成，再执行 <code>client2</code> 管道中的命令，因此，在服务端中的命令执行顺序有可能是下面这种情况	</p>
+<p><img src="/image/article/Redis/20230504103058.png" alt="20230504103058">	</p>
+<p>这种行为显示 <code>Pipelining</code> 在执行的时候并不会阻塞服务端。即使 <code>client1</code> 向客户端发送了包含多条指令的 <code>Pipelining</code> ，其他客户端也不会被阻塞，因为他们发送的指令可以插入到 <code>Pipelining</code> 中间执行	</p>
+<h2 id="Pipelining-局限性"><a href="#Pipelining-局限性" class="headerlink" title="Pipelining 局限性"></a>Pipelining 局限性</h2><p>只有在 <code>Pipelining</code> 内所有命令执行完后，服务端才会把执行结果通过数组的方式返回给客户端。在执行 <code>Pipelining</code> 内的命令的时候，如果某些指令执行失败， <code>Pipelining</code> 仍会继续执行	</p>
+<p>比如下面的例子	</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta prompt_">$ </span><span class="language-bash"><span class="built_in">printf</span> <span class="string">&quot;SET name huangxy\r\nINCR name\r\nGET name\r\n&quot;</span> | nc localhost 6379</span>	</span><br><span class="line">+OK	</span><br><span class="line">-ERR value is not an integer or out of range	</span><br><span class="line"><span class="meta prompt_">$</span><span class="language-bash">6</span>	</span><br><span class="line">huangxy	</span><br><span class="line">复制代码	</span><br></pre></td></tr></table></figure>
+<p><code>Pipelining</code> 中第二条指令执行失败， <code>Pipelining</code> 并不会停止，而是会继续执行，等所有命令都执行完的时候，再将结果返回给客户端，其中第二条指令返回的是错误信息	</p>
+<p><code>Pipelining</code> 的这个特性会导致一个问题，就是当 <code>Pipelining</code> 中的指令需要读取之前指令设置 key 的时候，需要额外小心，因为 key 的值有可能会被其他客户端修改。此时 <code>Pipelining</code> 的执行结果往往就不是我们所预期的	</p>
+<h2 id="Pipelining-使用场景"><a href="#Pipelining-使用场景" class="headerlink" title="Pipelining 使用场景"></a>Pipelining 使用场景</h2><ul>
+<li>对性能有要求	</li>
+<li>需要发送多个指令到服务端	</li>
+<li>不需要上个命令的返回结果作为下个命令的输入</li>
+</ul>
+<p>	</p>
+<h1 id="Transactions（事务）"><a href="#Transactions（事务）" class="headerlink" title="Transactions（事务）"></a>Transactions（事务）</h1><p><code>redis</code> 中的事务，跟我们之前在学关系型数据库的时候所了解到的事务概念有点区别。 <code>redis</code> 中的事务机制主要是用来对多个命令进行排队，并在最后决定是否需要执行事务中的所有命令与否	</p>
+<p>与管道不同，事务使用特殊的命令来标记事务的开始和结束（ <code>MULTI</code> 、 <code>EXEC</code> 、 <code>DISCARD</code> ）。服务器还可以对事务中的命令进行排队（这样客户端可以一次发送一条命令）。除此之外，一些第三方库还喜欢在客户端中对事务的命令进行缓存，然后通过在管道中发送整个事务的方式对其进行优化	</p>
+<h2 id="事务的优点"><a href="#事务的优点" class="headerlink" title="事务的优点"></a>事务的优点</h2><p>事务提供了 <code>WATCH</code> 命令，使我们可以实现 CAS 功能，比如通过事务，我们可以实现跟 <code>INCR</code> 命令一样的功能	<br>Watch 命令是Exec命令的执行条件；也就是说，如果Watch的Key没有被修改则Redis执行事务，否则（Watch的key被其他事务修改了）事务不会被执行。	<br>Watch 命令可以被调用多次，一个Watch 命令可以监控多个key。Watch 命令调用即启动监控功能，从Watch 命令开始点到执行EXEC命令终止。一旦EXEC被调用，所有的键都将不被监视，无论所讨论的事务是否被中止。关闭客户端连接也会触发所有的键被取消监视。	</p>
+<p>Redis Watch 命令给事务提供CAS机制。被Watch的Key被持续监控，如果key在Exec命令执行前有改变，那么整个事务被取消，Exec返回null表示事务没有成功。	</p>
+<figure class="highlight ini"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">WATCH mykey	</span><br><span class="line"><span class="attr">val</span> = GET mykey	</span><br><span class="line"><span class="attr">val</span> = val + <span class="number">1</span>	</span><br><span class="line">MULTI	</span><br><span class="line">SET mykey $val	</span><br><span class="line">EXEC	</span><br></pre></td></tr></table></figure>
+<h2 id="事务的原子性"><a href="#事务的原子性" class="headerlink" title="事务的原子性"></a>事务的原子性</h2><p><code>redis</code> 事务具备原子性，当一个事务正在执行时，服务端会阻塞其接收到的其他命令，只有在事务执行完成时，才会执行接下来的命令，因此事务具备原子性	</p>
+<h2 id="事务的局限性"><a href="#事务的局限性" class="headerlink" title="事务的局限性"></a>事务的局限性</h2><p>跟 <code>Pipelining</code> 一样，只有在事务执行完成时，才会把事务中多个命令的结果一并返回给客户端，因此客户端在事务还没有执行完的时候，无法获取其命令的执行结果	</p>
+<p>如果事务中的其中一个命令发生错误，会有以下两种可能性：	</p>
+<ul>
+<li>当发生语法错误，在执行 <code>EXEC</code> 命令的时候，事务将会被丢弃，不会执行	</li>
+<li>当发生运行时错误（操作了错误的数据类型）时， <code>redis</code> 会将报错信息缓存起来，继续执行后面的命令，并在最后将所有命令的执行结果返回给客户端（报错信息也会返回）。这意味着 <code>redis</code> 事务中没有回滚机制</li>
+</ul>
+<p>	</p>
+<h2 id="事务使用场景"><a href="#事务使用场景" class="headerlink" title="事务使用场景"></a>事务使用场景</h2><ul>
+<li>需要原子地执行多个命令	</li>
+<li>不需要事务中间命令的执行结果来编排后面的命令</li>
+</ul>
+<p>	</p>
+<h1 id="Lua-脚本"><a href="#Lua-脚本" class="headerlink" title="Lua 脚本"></a>Lua 脚本</h1><p><code>redis</code> 从 2.6 版本开始引入对 Lua 脚本的支持，通过在服务器中嵌入 Lua 环境， <code>redis</code> 客户端可以直接使用 Lua 脚本，在服务端原子地执行多个 <code>redis</code> 命令	</p>
+<h2 id="Lua-脚本的优势"><a href="#Lua-脚本的优势" class="headerlink" title="Lua 脚本的优势"></a>Lua 脚本的优势</h2><p>与 <code>Pipelining</code> 和 事务不同的是，在脚本内部，我们可以在脚本中获取中间命令的返回结果，然后根据结果值做相应的处理（如 if 判断）	</p>
+<figure class="highlight lua"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">local</span> key = KEYS[<span class="number">1</span>]	</span><br><span class="line"><span class="keyword">local</span> new = ARGV[<span class="number">1</span>]	</span><br><span class="line">	</span><br><span class="line"><span class="keyword">local</span> current = redis.call(<span class="string">&#x27;GET&#x27;</span>, key)	</span><br><span class="line"><span class="keyword">if</span> (current == <span class="literal">false</span>) <span class="keyword">or</span> (<span class="built_in">tonumber</span>(new) &lt; <span class="built_in">tonumber</span>(current)) <span class="keyword">then</span>	</span><br><span class="line">  redis.call(<span class="string">&#x27;SET&#x27;</span>, key, new)	</span><br><span class="line">  <span class="keyword">return</span> <span class="number">1</span>	</span><br><span class="line"><span class="keyword">else</span>	</span><br><span class="line">  <span class="keyword">return</span> <span class="number">0</span>	</span><br><span class="line"><span class="keyword">end</span>	</span><br><span class="line">复制代码	</span><br></pre></td></tr></table></figure>
+<p>同时， <code>redis</code> 服务端还支持对 Lua 脚本进行缓存（使用 <code>SCRIPT LOAD</code> 或 <code>EVAL</code> 执行过的脚本服务端都会对其进行缓存），下次可以使用 <code>EVALSHA</code> 命令调用缓存的脚本，节省带宽	</p>
+<h2 id="Lua-脚本的原子性"><a href="#Lua-脚本的原子性" class="headerlink" title="Lua 脚本的原子性"></a>Lua 脚本的原子性</h2><p>Lua 脚本跟事务一样具备原子性，当脚本执行中时，服务端接收到的命令会被阻塞	</p>
+<p>注意：如果Lua执行出错，可能就会出现一部分命令执行，一部分没有执行。	</p>
+<h2 id="Lua-脚本的局限性"><a href="#Lua-脚本的局限性" class="headerlink" title="Lua 脚本的局限性"></a>Lua 脚本的局限性</h2><p>Lua 脚本在功能上没有过多的限制，但要注意的一点是，Lua 脚本在执行的时候，会阻塞其他命令的执行，所以不宜在脚本中写太耗时的处理逻辑	</p>
+<h2 id="Lua-脚本的使用场景"><a href="#Lua-脚本的使用场景" class="headerlink" title="Lua 脚本的使用场景"></a>Lua 脚本的使用场景</h2><ul>
+<li>需要原子性地执行多个命令	</li>
+<li>需要中间值来组合后面的命令	</li>
+<li>需要中间值来编排后面的命令	</li>
+<li>常用于扩展 <code>redis</code> 功能，实现符合自己业务场景的命令</li>
+</ul>
+<p>	</p>
+<h1 id="Redis主从延迟"><a href="#Redis主从延迟" class="headerlink" title="Redis主从延迟"></a>Redis主从延迟</h1><p>首先Redis主从同步延迟原因	</p>
+<ul>
+<li>网络延迟: 由于主从同步的过程依赖于网络传输,如果两个节点直接的网络传输比较慢,就会出现同步延迟	</li>
+<li>节点性能差异: 如果从节点cpu,内存,硬盘读写性能较差,导致从节点写如数据较慢	</li>
+<li>主节点写入速度过快: 当主节点的写入速度过快时，从节点可能没能及时复制主节点的数据，导致主从数据不一致。这种情况下，可以通过调节主节点的写入速度或者增加从节点的数量来解决。	</li>
+<li>Redis 配置不当: 如果 Redis 的配置不当，也会导致主从同步延迟。一些错误的配置，如 TCP 缓存、网络拥塞、Redis 性能参数等都可能会影响 Redis 主从同步的效率。</li>
+</ul>
+<p>	</p>
+<p>解决方案	</p>
+<ul>
+<li>增加从节点: 增加从节点可以解决主从节点性能差异导致的问题。当从节点的数量越多，数据同步的速度就会越快，从而有效地解决了主从同步延迟的问题。但需要注意的是，增加从节点也会带来一些额外的开销，如网络带宽、内存等。	</li>
+<li>优化 Redis 配置: 调整 Redis 的性能参数；增加 Redis 实例的数量；调整 TCP 缓存和缓冲区大小等参数；增加 Redis 缓存大小。</li>
+</ul>
+<p>	</p>
+<p>不过根本上还是害怕数据丢失,理论上 Redis 是不推荐存储重要数据,就是丢失了就丢失了,或者已经在数据库落库了,redis数据丢失后,可以直接从数据库读取数据后加载。不绝对依赖于redis,这样就不害怕数据丢失了	</p>
+<p>软件测试相关群加了无数个，大部分都成了水群，说着不着边际的话，吹着实现不了的牛逼，问个问题犹如石沉大海	</p>
+<h1 id="Lua语法"><a href="#Lua语法" class="headerlink" title="Lua语法"></a>Lua语法</h1><h2 id="不等于"><a href="#不等于" class="headerlink" title="不等于 ~&#x3D;"></a>不等于 ~&#x3D;</h2><figure class="highlight lua"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">if</span> (value ~= <span class="literal">false</span> <span class="keyword">and</span> value==ARGV[<span class="number">2</span>]) <span class="keyword">then</span>	</span><br></pre></td></tr></table></figure>
+<h2 id="if语法"><a href="#if语法" class="headerlink" title="if语法"></a>if语法</h2><figure class="highlight lua"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">if</span>(boolean_expression)  	</span><br><span class="line"><span class="keyword">then</span>  	</span><br><span class="line">   <span class="comment">--[ 如何条件为真，则执行此处代码。 --]  	</span></span><br><span class="line"><span class="keyword">else</span>  	</span><br><span class="line">   <span class="comment">--[ 如何条件为假，则执行此处代码。 --]  	</span></span><br><span class="line"><span class="keyword">end</span>  	</span><br><span class="line">```    	</span><br><span class="line">  	</span><br><span class="line">当布尔表达式为真时，执行 <span class="keyword">if</span> 语句的代码块；如果条件为假时，则执行 <span class="keyword">else</span> 语句的代码块。    	</span><br><span class="line">Lua 语言中所有布尔真与非 <span class="literal">nil</span> 的组合的结果被当作真，而布尔假与 <span class="literal">nil</span> 组合被当作假。值得注意的是，Lua 中零被当作真，这一点与其它大部分语言不一样。	</span><br><span class="line">	</span><br><span class="line">	</span><br><span class="line">多分支 则是<span class="keyword">elseif</span>,注意：lua中<span class="keyword">elseif</span>连着写不然会报错  条件后加<span class="keyword">then</span>	</span><br><span class="line">```lua	</span><br><span class="line"><span class="keyword">if</span> a&lt;<span class="number">5</span> <span class="keyword">then</span>	</span><br><span class="line"><span class="built_in">print</span>(<span class="string">&quot;123&quot;</span>)	</span><br><span class="line"><span class="keyword">elseif</span> a==<span class="number">6</span> <span class="keyword">then</span>	</span><br><span class="line">	<span class="built_in">print</span>(<span class="string">&quot;5&quot;</span>)	</span><br><span class="line"><span class="keyword">elseif</span> a==<span class="number">7</span> <span class="keyword">then</span>	</span><br><span class="line">	<span class="built_in">print</span>(<span class="string">&quot;7&quot;</span>)	</span><br><span class="line"><span class="keyword">elseif</span> a==<span class="number">8</span> <span class="keyword">then</span>	</span><br><span class="line">	<span class="built_in">print</span>(<span class="string">&quot;8&quot;</span>)	</span><br><span class="line"><span class="keyword">elseif</span> a==<span class="number">9</span> <span class="keyword">then</span>	</span><br><span class="line">	<span class="built_in">print</span>(<span class="string">&quot;9&quot;</span>)	</span><br><span class="line"><span class="keyword">else</span>	</span><br><span class="line">	<span class="built_in">print</span>(<span class="string">&quot;other&quot;</span>)	</span><br><span class="line"><span class="keyword">end</span>	</span><br><span class="line"> 	</span><br><span class="line"><span class="keyword">if</span> a &gt;= <span class="number">3</span> <span class="keyword">and</span> a &lt;= <span class="number">9</span> <span class="keyword">then</span>	</span><br><span class="line">	<span class="built_in">print</span>(<span class="string">&quot;3到9之间&quot;</span>)	</span><br><span class="line"><span class="keyword">end</span>	</span><br><span class="line"> 	</span><br><span class="line"><span class="comment">---------------	</span></span><br><span class="line"><span class="number">9</span>	</span><br><span class="line"><span class="number">3</span>到<span class="number">9</span>之间	</span><br></pre></td></tr></table></figure>
+<h2 id="while循环"><a href="#while循环" class="headerlink" title="while循环"></a>while循环</h2><figure class="highlight lua"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line">num = <span class="number">0</span>	</span><br><span class="line"><span class="keyword">while</span> num &lt; <span class="number">5</span> <span class="keyword">do</span>	</span><br><span class="line">	<span class="built_in">print</span>(num)	</span><br><span class="line">	num = num +<span class="number">1</span>	</span><br><span class="line"><span class="keyword">end</span>	</span><br><span class="line">***********<span class="keyword">while</span>语句*************	</span><br><span class="line"><span class="number">0</span>	</span><br><span class="line"><span class="number">1</span>	</span><br><span class="line"><span class="number">2</span>	</span><br><span class="line"><span class="number">3</span>	</span><br><span class="line"><span class="number">4</span>	</span><br></pre></td></tr></table></figure>
+<p>在此再次说明，lua中没有++ – &#x3D;+ &#x3D;-等自增自减、复合运算符。	</p>
+<h2 id="for循环"><a href="#for循环" class="headerlink" title="for循环"></a>for循环</h2><figure class="highlight lua"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br></pre></td><td class="code"><pre><span class="line"> 	</span><br><span class="line"><span class="built_in">print</span>(<span class="string">&quot;********for语句*************&quot;</span>)	</span><br><span class="line"> 	</span><br><span class="line"><span class="keyword">for</span> i = <span class="number">1</span>,<span class="number">5</span> <span class="keyword">do</span><span class="comment">--默认递增 i会默认+1	</span></span><br><span class="line">	<span class="built_in">print</span>(i)	</span><br><span class="line"><span class="keyword">end</span>	</span><br><span class="line">********<span class="keyword">for</span>语句*************	</span><br><span class="line"><span class="number">1</span>	</span><br><span class="line"><span class="number">2</span>	</span><br><span class="line"><span class="number">3</span>	</span><br><span class="line"><span class="number">4</span>	</span><br><span class="line"><span class="number">5</span>	</span><br></pre></td></tr></table></figure>
+<p>如果想自定义增量 直接逗号后面写	</p>
+<figure class="highlight lua"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line"><span class="keyword">for</span> i = <span class="number">1</span>,<span class="number">5</span>,<span class="number">2</span> <span class="keyword">do</span><span class="comment">--如果想自定义增量 直接逗号后面写	</span></span><br><span class="line">	<span class="built_in">print</span>(i)	</span><br><span class="line"><span class="keyword">end</span>	</span><br><span class="line"><span class="comment">------------------------	</span></span><br><span class="line"><span class="number">1</span>	</span><br><span class="line"><span class="number">3</span>	</span><br><span class="line"><span class="number">5</span>	</span><br></pre></td></tr></table></figure>
+<h1 id="Redis-与-Lua-使用中的小问题"><a href="#Redis-与-Lua-使用中的小问题" class="headerlink" title="Redis 与 Lua 使用中的小问题"></a>Redis 与 Lua 使用中的小问题</h1><h2 id="问题"><a href="#问题" class="headerlink" title="问题"></a>问题</h2><p>在 <a target="_blank" rel="noopener" href="https://cloud.tencent.com/product/crs?from_column=20065&from=20065">Redis</a> 里执行 <code>get</code> 或 <code>hget</code> 不存在的 <code>key</code> 或 <code>field</code> 时返回值在终端显式的是 <code>(nil)</code>，类似于下面这样	</p>
+<figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line"><span class="number">127.0</span><span class="number">.0</span><span class="number">.1</span>:<span class="number">6379</span>&gt; get test_version	</span><br><span class="line">(nil)	</span><br></pre></td></tr></table></figure>
+<p>复制	</p>
+<p>如果在 Lua 脚本中判断获取到的值是否为空值时，就会产生比较迷惑的问题，以为判断空值的话就用 <code>nil</code> 就可以了，然鹅事实却并不是这样的，如下所示：	</p>
+<figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="number">127.0</span><span class="number">.0</span><span class="number">.1</span>:<span class="number">6379</span>&gt; get test_version	</span><br><span class="line">(nil)	</span><br><span class="line"><span class="number">127.0</span><span class="number">.0</span><span class="number">.1</span>:<span class="number">6379</span>&gt; <span class="variable constant_">EVAL</span> <span class="string">&quot;local a = redis.call(&#x27;get&#x27;,KEYS[1]) print(a) if a == &#x27;nil&#x27; then return 1 else return 0 end&quot;</span> <span class="number">1</span> test_version test_version	</span><br><span class="line">(integer) <span class="number">0</span>	</span><br></pre></td></tr></table></figure>
+<p>复制	</p>
+<p>我们来看下执行 Lua 脚本返回结果的数据类型是什么	</p>
+<figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="number">127.0</span><span class="number">.0</span><span class="number">.1</span>:<span class="number">6379</span>&gt; get test_version	</span><br><span class="line">(nil)	</span><br><span class="line"><span class="number">127.0</span><span class="number">.0</span><span class="number">.1</span>:<span class="number">6379</span>&gt; <span class="variable constant_">EVAL</span> <span class="string">&quot;local a = redis.call(&#x27;get&#x27;,KEYS[1]) return type(a)&quot;</span> <span class="number">1</span> test_version test_version	</span><br><span class="line"><span class="string">&quot;boolean&quot;</span>	</span><br></pre></td></tr></table></figure>
+<p>复制	</p>
+<p>通过上面的脚本可以看到，当 Redis 返回的结果为 <code>(nil)</code> 时候，其真实的数据类型为 <code>boolean</code>，因此我们直接判断 <code>nil</code> 是有问题的。	</p>
+<h2 id="Redis-官方文档"><a href="#Redis-官方文档" class="headerlink" title="Redis 官方文档"></a>Redis 官方文档</h2><p>通过翻阅<a href="https://cloud.tencent.com/developer/tools/blog-entry?target=https://redis.io/commands/eval">官方文档</a>，找到下面所示的一段话，	</p>
+<p><strong>Redis to Lua</strong> conversion table.	</p>
+<ul>
+<li>Redis integer reply -&gt; Lua number	</li>
+<li>Redis bulk reply -&gt; Lua string	</li>
+<li>Redis multi bulk reply -&gt; Lua table (may have other Redis data types nested)	</li>
+<li>Redis status reply -&gt; Lua table with a single ok field containing the status	</li>
+<li>Redis error reply -&gt; Lua table with a single err field containing the error	</li>
+<li>Redis Nil bulk reply and Nil multi bulk reply -&gt; Lua false boolean type</li>
+</ul>
+<p>	</p>
+<p><strong>Lua to Redis</strong> conversion table.	</p>
+<ul>
+<li>Lua number -&gt; Redis integer reply (the number is converted into an integer)	</li>
+<li>Lua string -&gt; Redis bulk reply	</li>
+<li>Lua table (array) -&gt; Redis multi bulk reply (truncated to the first nil inside the Lua array if any)	</li>
+<li>Lua table with a single ok field -&gt; Redis status reply	</li>
+<li>Lua table with a single err field -&gt; Redis error reply	</li>
+<li>Lua boolean false -&gt; Redis Nil bulk reply.</li>
+</ul>
+<p>	</p>
+<h2 id="解决方案"><a href="#解决方案" class="headerlink" title="解决方案"></a>解决方案</h2><p>通过<a href="https://cloud.tencent.com/developer/tools/blog-entry?target=https://redis.io/commands/eval">官方文档</a>，我们知道判断 Lua 脚本返回空值使用，应该直接判断 <code>true/false</code>，修改判断脚本如下所示	</p>
+<figure class="highlight javascript"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br></pre></td><td class="code"><pre><span class="line"><span class="number">127.0</span><span class="number">.0</span><span class="number">.1</span>:<span class="number">6379</span>&gt; get test_version	</span><br><span class="line">(nil)	</span><br><span class="line"><span class="number">127.0</span><span class="number">.0</span><span class="number">.1</span>:<span class="number">6379</span>&gt;  <span class="variable constant_">EVAL</span> <span class="string">&quot;local a = redis.call(&#x27;get&#x27;,KEYS[1]) if a == false then return &#x27;empty&#x27; else return &#x27;not empty&#x27; end&quot;</span> <span class="number">1</span> test_version test_version	</span><br><span class="line"><span class="string">&quot;empty&quot;</span>	</span><br></pre></td></tr></table></figure>
+<h1 id="Redission"><a href="#Redission" class="headerlink" title="Redission"></a>Redission</h1><h2 id="延时队列"><a href="#延时队列" class="headerlink" title="延时队列"></a>延时队列</h2><p>实际上，redisson 使用了 两个list + 一个 sorted-set + pub&#x2F;sub 来实现延时队列，而不是单一的sort-set。	</p>
+<p>sorted-set：存放未到期的消息&amp;到期时间，提供消息延时排序功能	<br>list-0：存放未到期消息，作为消息的原始顺序视图，提供如查询、删除指定第几条消息的功能（分析源码得出的，查看哪些地方有使用这个list）	<br>list-q：消费队列，存放到期后的消息，提供消费	</p>
+<p><img src="/image/article/Redis/20230925155959.png" alt="20230925155959">	</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br></pre></td><td class="code"><pre><span class="line">- zrangebyscore：获取zset中score在0至当前时间戳范围内的前一百条数据	</span><br><span class="line">- rpush：向list右边push一条数据	</span><br><span class="line">- lrem：删除一条数据	</span><br><span class="line">- zrem：删除zeset中的数据	</span><br><span class="line">- zrange：获取第一条数据	</span><br><span class="line">- BLPOP：阻塞等待队列消息	</span><br><span class="line">	</span><br><span class="line">通过以上redis命令的执行可以发现一个命令SUBCRIBE用于订阅redis的一个队列，而这个命令只在发送消息的时候执行了，在消费的时候没有执行。从而验证了当服务重启后如果没有新的消息发送，那么客户端就不会发送SUBCRIBE命令，订阅延时队列，这就导致在服务重启前发送的消息到时间后无法消费。	</span><br><span class="line">	</span><br><span class="line">  	</span><br><span class="line">	</span><br><span class="line">作者：法力损毁  	</span><br><span class="line">链接：https://juejin.cn/post/7147507349442265101  	</span><br><span class="line">来源：稀土掘金  	</span><br><span class="line">著作权归作者所有。商业转载请联系作者获得授权，非商业转载请注明出处。	</span><br></pre></td></tr></table></figure>
+<ol>
+<li><p>org.redisson.RedissonDelayedQueue#RedissonDelayedQueue	<br>首先创建延时队列的时候，会创建一个QueueTransferTask, 在里面会订阅一个topic，订阅成功后，执行其pushTask方法，里面会查询sorted-set中100个已到期的消息，将其push到list-q中，并从sorted-set和list-0中移除。（这里是为了投递历史未处理的消息）	</p>
+</li>
+<li><p>org.redisson.RedissonDelayedQueue#offerAsync(V, long, java.util.concurrent.TimeUnit)	<br>发送延时消息时，会将消息写入 list-0 和 sorted-set 中，msg会添加一个randomId，支持发送相同的消息。并且判断sorted-set首条消息如果是刚插入的，则publish timeout（到期时间） 到 topic	</p>
+</li>
+<li><p>org.redisson.QueueTransferTask#scheduleTask	<br>订阅到topic消息后，会先判断其是否临期（delay&lt;10ms），如果是则调用pushTask方法（1中有说明），不是则启动一个定时任务（使用的netty时间轮），延时delay后执行pushTask方法。	<br><a target="_blank" rel="noopener" href="https://blog.csdn.net/Wu_Shang001/article/details/120609138">Redisson 延迟队列实现原理探究_redisson 延迟队列原理_不如敲代码的博客-CSDN博客</a></p>
+</li>
+</ol>
+<p>	</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">- 客户端启动，redisson先订阅一个key，同时 BLPOP key 0 无限监听一个阻塞队列（等里面有数据了就返回）。	</span><br><span class="line">- 当有数据put时，redisson先把数据放到一个zset集合（按延时到期时间的时间戳为分数排序），同时发布上面订阅的key，发布内容为数据到期的timeout，此时客户端进程开启一个延时任务，延时时间为发布的timeout。	</span><br><span class="line">- 客户端进程的延时任务到了时间执行，从zset分页取出过了当前时间的数据，然后将数据rpush到第一步的阻塞队列里。然后将当前数据从zset移除，取完之后，又执行 BLPOP key 0 无限监听一个阻塞队列。	</span><br><span class="line">- 上一步客户端监听的阻塞队列返回取到数据，回调到 RBlockingQueue 的 take方法。于是，我们就收到了数据。	</span><br><span class="line">	</span><br><span class="line">**大致原理就是这样，redisson不是通过轮询zset的，将延时任务执行放到进程里面实现，只有到时间才会取redis zset。**	</span><br></pre></td></tr></table></figure>
+<h1 id="HashedWheelTimer-源码解析"><a href="#HashedWheelTimer-源码解析" class="headerlink" title="HashedWheelTimer 源码解析"></a>HashedWheelTimer 源码解析</h1><p><a target="_blank" rel="noopener" href="https://zhuanlan.zhihu.com/p/344163516">HashedWheelTimer 源码解析 - 知乎 (zhihu.com)</a>	</p>
+<h1 id="操作命令"><a href="#操作命令" class="headerlink" title="操作命令"></a>操作命令</h1><p><a target="_blank" rel="noopener" href="https://www.runoob.com/redis/lists-lrem.html">Redis Lrem 命令 | 菜鸟教程 (runoob.com)</a>	</p>
+<h1 id="博客"><a href="#博客" class="headerlink" title="博客"></a>博客</h1><h1 id="数据类型"><a href="#数据类型" class="headerlink" title="数据类型"></a>数据类型</h1><h1 id="数据结构"><a href="#数据结构" class="headerlink" title="数据结构"></a>数据结构</h1><h1 id="分布式锁"><a href="#分布式锁" class="headerlink" title="分布式锁"></a>分布式锁</h1><h2 id="并发竞争问题"><a href="#并发竞争问题" class="headerlink" title="并发竞争问题"></a>并发竞争问题</h2><p>比如我们有三个系统服务，然后由于某个数据从来没请求过，现在三个系统并发对该数据进行请求和修改的时候就会出现并发竞争问题了，当然由于redis的单线程结构其实这里不存在锁和阻塞问题，这里的问题是可能出现老数据覆盖新数据的问题。	</p>
+<p>只有成功获取锁的系统可以进行修改并且要带上数据的版本号，我们要做<strong>cas和自旋</strong>(自行参考aotomicinteger修改数据方法的源码（<code>compareAndSwap</code>）)只有到了这个版本号才进行修改	</p>
+<h1 id="缓存穿透、缓存击穿、缓存雪崩"><a href="#缓存穿透、缓存击穿、缓存雪崩" class="headerlink" title="缓存穿透、缓存击穿、缓存雪崩"></a>缓存穿透、缓存击穿、缓存雪崩</h1><h1 id="pineline和Lua脚本"><a href="#pineline和Lua脚本" class="headerlink" title="pineline和Lua脚本"></a>pineline和Lua脚本</h1><h1 id="缓存和数据库数据一致性"><a href="#缓存和数据库数据一致性" class="headerlink" title="缓存和数据库数据一致性"></a>缓存和数据库数据一致性</h1><p><strong>这部分内容偏理论，实际操作更复杂</strong>	</p>
+<p>首先这里的 “数据一致性”指的是什么？	<br>意思就是 数据库中的某个数据如果缓存中存在，那它们的版本应该是一致的。<strong>这里用 值一致 来形容不严谨，存在ABA情况</strong>	</p>
+<p>按照缓存读写模式，根据是否接收写请求，把缓存分成读写缓存和只读缓存	</p>
+<p>对于读写缓存来说，如果要对数据进行增删改，就需要在缓存中进行，同时还要根据采取的写回策略，决定是否同步写回到数据库中。	</p>
+<ul>
+<li>同步直写策略：写缓存时，也同步写数据库，缓存和数据库中的数据一致；	</li>
+<li>异步写回策略：写缓存时不同步写数据库，等到数据从缓存中淘汰时，再写回数据库。使用这种策略时，如果数据还没有写回数据库，缓存就发生了故障，那么，此时，数据库就没有最新的数据了。</li>
+</ul>
+<p>	</p>
+<p>对于读写缓存来说，要想保证缓存和数据库中的数据一致，就要采用同步直写策略。不过，需要注意的是，如果采用这种策略，就<strong>需要同时更新缓存和数据库。所以，我们要在业务应用中使用事务机制，来保证缓存和数据库的更新具有原子性</strong>，也就是说，两者要不一起更新，要不都不更新，返回错误信息，进行重试。否则，我们就无法实现同步直写。	</p>
+<p>当然，在有些场景下，我们对数据一致性的要求可能不是那么高，比如说缓存的是电商商品的非关键属性或者短视频的创建或修改时间等，那么，我们可以使用异步写回策略。	</p>
+<p>对于只读缓存来说，如果有数据新增，会直接写入数据库；而有数据删改时，就需要把只读缓存中的数据标记为无效或者删除。这样一来，应用后续再访问这些增删改的数据时，因为缓存中没有相应的数据，就会发生缓存缺失。此时，应用再从数据库中把数据读入缓存，这样后续再访问数据时，就能够直接从缓存中读取了。	</p>
+<p>&#x3D;&#x3D;&#x3D;会不会发生删除缓存失败的情况？&#x3D;&#x3D;&#x3D;	</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">会。可以引入**重试机制**，将要删除/更新的缓存值存到消息队列中，当操作失败时可以重新读取信息再次操作，若多次后还是失败，报错	</span><br></pre></td></tr></table></figure>
+<p>&#x3D;&#x3D;&#x3D;数据在增改操作时，如果不是删除缓存值，而是直接更新缓存的值，你觉得和删除缓存值相比，有什么好处和不足？&#x3D;&#x3D;&#x3D;	</p>
+<figure class="highlight markdown"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br></pre></td><td class="code"><pre><span class="line">这种情况相当于把Redis当做读写缓存使用，删改操作同时操作数据库和缓存。	</span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">1、先更新数据库，再更新缓存：如果更新数据库成功，但缓存更新失败，此时数据库中是最新值，但缓存中是旧值，后续的读请求会直接命中缓存，得到的是旧值。	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">2、先更新缓存，再更新数据库：如果更新缓存成功，但数据库更新失败，此时缓存中是最新值，数据库中是旧值，后续读请求会直接命中缓存，但得到的是最新值，短期对业务影响不大。但是，一旦缓存过期或者满容后被淘汰，读请求就会从数据库中重新加载旧值到缓存中，之后的读请求会从缓存中得到旧值，对业务产生影响。	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">同样地，针对这种其中一个操作可能失败的情况，也可以使用重试机制解决，把第二步操作放入到消息队列中，消费者从消息队列取出消息，再更新缓存或数据库，成功后把消息从消息队列删除，否则进行重试，以此达到数据库和缓存的最终一致。	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">以上是没有并发请求的情况。如果存在并发读写，也会产生不一致，分为以下4种场景。	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">1、先更新数据库，再更新缓存，写+读并发：线程A先更新数据库，之后线程B读取数据，此时线程B会命中缓存，读取到旧值，之后线程A更新缓存成功，后续的读请求会命中缓存得到最新值。这种场景下，线程A未更新完缓存之前，在这期间的读请求会短暂读到旧值，对业务短暂影响。	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">2、先更新缓存，再更新数据库，写+读并发：线程A先更新缓存成功，之后线程B读取数据，此时线程B命中缓存，读取到最新值后返回，之后线程A更新数据库成功。这种场景下，虽然线程A还未更新完数据库，数据库会与缓存存在短暂不一致，但在这之前进来的读请求都能直接命中缓存，获取到最新值，所以对业务没影响。	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">3、先更新数据库，再更新缓存，写+写并发：线程A和线程B同时更新同一条数据，更新数据库的顺序是先A后B，但更新缓存时顺序是先B后A，这会导致数据库和缓存的不一致。	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">4、先更新缓存，再更新数据库，写+写并发：与场景3类似，线程A和线程B同时更新同一条数据，更新缓存的顺序是先A后B，但是更新数据库的顺序是先B后A，这也会导致数据库和缓存的不一致。	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">场景1和2对业务影响较小，场景3和4会造成数据库和缓存不一致，影响较大。也就是说，在读写缓存模式下，写+读并发对业务的影响较小，而写+写并发时，会造成数据库和缓存的不一致。	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">**针对场景3和4的解决方案是，对于写请求，需要配合分布式锁使用**。写请求进来时，针对同一个资源的修改操作，先加分布式锁，这样同一时间只允许一个线程去更新数据库和缓存，没有拿到锁的线程把操作放入到队列中，延时处理。用这种方式保证多个线程操作同一资源的顺序性，以此保证一致性。	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">综上，使用读写缓存同时操作数据库和缓存时，因为其中一个操作失败导致不一致的问题，同样可以通过消息队列重试来解决。而在并发的场景下，读+写并发对业务没有影响或者影响较小，而写+写并发时需要配合分布式锁的使用，才能保证缓存和数据库的一致性。	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">另外，读写缓存模式由于会同时更新数据库和缓存，优点是，缓存中一直会有数据，如果更新操作后会立即再次访问，可以直接命中缓存，能够降低读请求对于数据库的压力（没有了只读缓存的删除缓存导致缓存缺失和再加载的过程）。缺点是，如果更新后的数据，之后很少再被访问到，会导致缓存中保留的不是最热的数据，缓存利用率不高（只读缓存中保留的都是热数据），所以读写缓存比较适合用于读写相当的业务场景。	</span></span><br><span class="line"><span class="code">	</span></span><br></pre></td></tr></table></figure>
+<p>删除缓存与更新缓存比较	</p>
+<figure class="highlight markdown"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br></pre></td><td class="code"><pre><span class="line">原因很简单，很多时候，复杂点的缓存的场景，因为缓存有的时候，不简单是数据库中直接取出来的值	</span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">商品详情页的系统，修改库存，只是修改了某个表的某些字段，但是要真正把这个影响的最终的库存计算出来，可能还需要从其他表查询一些数据，然后进行一些复杂的运算，才能最终计算出	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">现在最新的库存是多少，然后才能将库存更新到缓存中去	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">比如可能更新了某个表的一个字段，然后其对应的缓存，是需要查询另外两个表的数据，并进行运算，才能计算出缓存最新的值的	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">更新缓存的代价是很高的	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">是不是说，每次修改数据库的时候，都一定要将其对应的缓存去跟新一份？也许有的场景是这样的，但是对于比较复杂的缓存数据计算的场景，就不是这样了	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">如果你频繁修改一个缓存涉及的多个表，那么这个缓存会被频繁的更新，频繁的更新缓存	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">但是问题在于，这个缓存到底会不会被频繁访问到？？？	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">举个例子，一个缓存涉及的表的字段，在1分钟内就修改了20次，或者是100次，那么缓存跟新20次，100次; 但是这个缓存在1分钟内就被读取了1次，有大量的冷数据	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">28法则，黄金法则，20%的数据，占用了80%的访问量	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">实际上，如果你只是删除缓存的话，那么1分钟内，这个缓存不过就重新计算一次而已，开销大幅度降低	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">每次数据过来，就只是删除缓存，然后修改数据库，如果这个缓存，在1分钟内只是被访问了1次，那么只有那1次，缓存是要被重新计算的，用缓存才去算缓存	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">其实删除缓存，而不是更新缓存，就是一个lazy计算的思想，不要每次都重新做复杂的计算，不管它会不会用到，而是让它到需要被使用的时候再重新计算	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">原因很简单，很多时候，复杂点的缓存的场景，因为**缓存`有的时候`，`不简单`是数据库中直接取出来的值，可能需要比较`复杂的计算`，甚至进行很多网络请求以及DB请求（比如我们有个缓存就是查微信的公共库以及我们自己的私有库联合组成一个缓存），这种`更新缓存的代价很高`的，但是呢我们更新完了缓存这个缓存，这个缓存也不一定立马就有人用，可能我更新了很多次数据库`更新了很多次`缓存都`没人访问`，这就导致了我服务器做了很多`无用的计算`**	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">  	</span></span><br><span class="line"><span class="code">  	</span></span><br></pre></td></tr></table></figure>
+<p>如果不想在业务代码中写消息队列，是否有更简单的方法来保证一致性？	</p>
+<figure class="highlight markdown"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br></pre></td><td class="code"><pre><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">订阅数据库变更日志，再操作缓存	</span></span><br><span class="line"><span class="code">具体来讲就是，我们的业务应用在修改数据时，「只需」修改数据库，无需操作缓存。	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">订阅变更日志，目前也有了比较成熟的开源中间件，例如阿里的 canal，使用这种方案的优点在于：	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">-   **无需考虑写消息队列失败情况**：只要写 MySQL 成功，Binlog 肯定会有	</span></span><br><span class="line"><span class="code">    	</span></span><br><span class="line"><span class="code">-   **自动投递到下游队列**：canal 自动把数据库变更日志「投递」给下游的消息队列	</span></span><br><span class="line"><span class="code">    	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">当然，与此同时，我们需要投入精力去维护 canal 的高可用和稳定性。	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">&gt; 如果你有留意观察很多数据库的特性，就会发现其实很多数据库都逐渐开始提供「订阅变更日志」的功能了，相信不远的将来，我们就不用通过中间件来拉取日志，自己写程序就可以订阅变更日志了，这样可以进一步简化流程。	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">至此，我们可以得出结论，想要保证数据库和缓存一致性，**推荐采用「先更新数据库，再删除缓存」方案，并配合「消息队列」或「订阅变更日志」的方式来做**。	</span></span><br></pre></td></tr></table></figure>
+<p>引入缓存后可以做到强一致吗	</p>
+<figure class="highlight markdown"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br></pre></td><td class="code"><pre><span class="line">到这里你可能会想，这些方案还是不够完美，我就想让缓存和数据库「强一致」，到底能不能做到呢？	</span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">其实很难。	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">要想做到强一致，最常见的方案是 2PC、3PC、Paxos、Raft 这类一致性协议，但它们的性能往往比较差，而且这些方案也比较复杂，还要考虑各种容错问题。	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">相反，这时我们换个角度思考一下，我们引入缓存的目的是什么？	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">没错，**性能**。	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">一旦我们决定使用缓存，那必然要面临一致性问题。性能和一致性就像天平的两端，无法做到都满足要求。	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">而且，就拿我们前面讲到的方案来说，当操作数据库和缓存完成之前，只要有其它请求可以进来，都有可能查到「中间状态」的数据。	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">所以如果非要追求强一致，那必须要求所有更新操作完成之前期间，不能有「任何请求」进来。	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">虽然我们可以通过加「分布锁」的方式来实现，但我们要付出的代价，很可能会超过引入缓存带来的性能提升。	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">所以，既然决定使用缓存，就必须容忍「一致性」问题，我们只能尽可能地去降低问题出现的概率。	</span></span><br><span class="line"><span class="code">	</span></span><br><span class="line"><span class="code">同时我们也要知道，缓存都是有「失效时间」的，就算在这期间存在短期不一致，我们依旧有失效时间来兜底，这样也能达到最终一致。	</span></span><br></pre></td></tr></table></figure>
+<p><a target="_blank" rel="noopener" href="https://www.jianshu.com/p/d9ccecfc9723">Redis如何保障缓存与数据库的数据一致性问题？ - 简书 (jianshu.com)</a>	</p>
+<h4 id="主从库延迟和延迟双删问题"><a href="#主从库延迟和延迟双删问题" class="headerlink" title="主从库延迟和延迟双删问题"></a>主从库延迟和延迟双删问题</h4><p>到这里，还有 2 个问题，是我们没有重点分析过的。	</p>
+<p><strong>第一个问题</strong>，还记得前面讲到的「先删除缓存，再更新数据库」方案，导致不一致的场景么？	</p>
+<p>这里我再把例子拿过来让你复习一下：	</p>
+<p>2 个线程要并发「读写」数据，可能会发生以下场景：	</p>
+<ol>
+<li><p>线程 A 要更新 X &#x3D; 2（原值 X &#x3D; 1）	</p>
+</li>
+<li><p>线程 A 先删除缓存	</p>
+</li>
+<li><p>线程 B 读缓存，发现不存在，从数据库中读取到旧值（X &#x3D; 1）	</p>
+</li>
+<li><p>线程 A 将新值写入数据库（X &#x3D; 2）	</p>
+</li>
+<li><p>线程 B 将旧值写入缓存（X &#x3D; 1）</p>
+</li>
+</ol>
+<p>	</p>
+<p>最终 X 的值在缓存中是 1（旧值），在数据库中是 2（新值），发生不一致。	</p>
+<p><strong>第二个问题</strong>：是关于「读写分离 + 主从复制延迟」情况下，缓存和数据库一致性的问题。	</p>
+<p>在「先更新数据库，再删除缓存」方案下，「读写分离 + 主从库延迟」其实也会导致不一致：	</p>
+<ol>
+<li><p>线程 A 更新主库 X &#x3D; 2（原值 X &#x3D; 1）	</p>
+</li>
+<li><p>线程 A 删除缓存	</p>
+</li>
+<li><p>线程 B 查询缓存，没有命中，查询「从库」得到旧值（从库 X &#x3D; 1）	</p>
+</li>
+<li><p>从库「同步」完成（主从库 X &#x3D; 2）	</p>
+</li>
+<li><p>线程 B 将「旧值」写入缓存（X &#x3D; 1）</p>
+</li>
+</ol>
+<p>	</p>
+<p>最终 X 的值在缓存中是 1（旧值），在主从库中是 2（新值），也发生不一致。	</p>
+<p>看到了么？这 2 个问题的核心在于：<strong>缓存都被回种了「旧值」</strong>。	</p>
+<p>那怎么解决这类问题呢？	</p>
+<p>最有效的办法就是，<strong>把缓存删掉</strong>。	</p>
+<p>但是，不能立即删，而是需要「延迟删」，这就是业界给出的方案：<strong>缓存延迟双删策略</strong>。	</p>
+<p>按照延时双删策略，这 2 个问题的解决方案是这样的：	</p>
+<p><strong>解决第一个问题</strong>：在线程 A 删除缓存、更新完数据库之后，先「休眠一会」，再「删除」一次缓存。	</p>
+<p><strong>解决第二个问题</strong>：线程 A 可以生成一条「延时消息」，写到消息队列中，消费者延时「删除」缓存。	</p>
+<p>这两个方案的目的，都是为了把缓存清掉，这样一来，下次就可以从数据库读取到最新值，写入缓存。	</p>
+<p>但问题来了，这个「延迟删除」缓存，延迟时间到底设置要多久呢？	</p>
+<ul>
+<li><p>问题1：延迟时间要大于「主从复制」的延迟时间	</p>
+</li>
+<li><p>问题2：延迟时间要大于线程 B 读取数据库 + 写入缓存的时间</p>
+</li>
+</ul>
+<p>	</p>
+<p>但是，<strong>这个时间在分布式和高并发场景下，其实是很难评估的****。</strong>	</p>
+<p>很多时候，我们都是凭借经验大致估算这个延迟时间，例如延迟 1-5s，只能尽可能地降低不一致的概率。	</p>
+<p>所以你看，采用这种方案，也只是尽可能保证一致性而已，极端情况下，还是有可能发生不一致。	</p>
+<p>所以实际使用中，我还是建议你采用「先更新数据库，再删除缓存」的方案，同时，要尽可能地保证「主从复制」不要有太大延迟，降低出问题的概率。	</p>
+<p>1、想要提高应用的性能，可以引入「缓存」来解决	</p>
+<p>2、引入缓存后，需要考虑缓存和数据库一致性问题，可选的方案有：「更新数据库 + 更新缓存」、「更新数据库 + 删除缓存」	</p>
+<p>3、更新数据库 + 更新缓存方案，在「并发」场景下无法保证缓存和数据一致性，且存在「缓存资源浪费」和「机器性能浪费」的情况发生	</p>
+<p>4、在更新数据库 + 删除缓存的方案中，「先删除缓存，再更新数据库」在「并发」场景下依旧有数据不一致问题，解决方案是「延迟双删」，但这个延迟时间很难评估，所以推荐用「先更新数据库，再删除缓存」的方案	</p>
+<p>5、在「先更新数据库，再删除缓存」方案下，为了保证两步都成功执行，需配合「消息队列」或「订阅变更日志」的方案来做，本质是通过「重试」的方式保证数据一致性	</p>
+<p>6、在「先更新数据库，再删除缓存」方案下，「读写分离 + 主从库延迟」也会导致缓存和数据库不一致，缓解此问题的方案是「延迟双删」，凭借经验发送「延迟消息」到队列中，延迟删除缓存，同时也要控制主从库延迟，尽可能降低不一致发生的概率	</p>
+<h1 id="持久化"><a href="#持久化" class="headerlink" title="持久化"></a>持久化</h1><h2 id="AOF"><a href="#AOF" class="headerlink" title="AOF"></a>AOF</h2><p>   我们都知道 Redis 的数据全部在内存里，如果突然宕机，数据就会全部丢失，因此必须有一种机制来保证 Redis 的数据不会因为故障而丢失，这种机制就是 Redis 的持久化机制。	</p>
+<p>        众所周知，Redis 的持久化机制有两种，第一种是快照RDB，第二种是 AOF 日志。快照是一次全量备份，AOF 日志是连续的增量备份。快照是内存数据的二进制序列化形式，在存储上非常紧凑，基本一次五分钟左右，而 AOF 日志记录的是内存数据修改的指令记录文本。AOF 日志在长期的运行过程中会变得无比庞大，数据库重启时需要加载 AOF 日志进行指令重放，这个时间就会无比漫长，所以需要定期进行 AOF 重写，给 AOF 日志进行瘦身。	</p>
+<p>        那么，RDB或者AOF能否保证数据百分百不丢失？疑问的我在百度上搜了搜，发现很多博客都讲，将appendfsync值设置为always就可以了。这回答让我对《redis设计与实现》产生了怀疑。难道新版本的redis能够保证数据100%不丢失？！	</p>
+<p>我们来看一下aof 设置always的源码分析	</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br></pre></td><td class="code"><pre><span class="line">void flushAppendOnlyFile(int force) &#123;    	</span><br><span class="line">    if (sdslen(server.aof_buf) == 0) return;	</span><br><span class="line">    if (server.aof_fsync == AOF_FSYNC_EVERYSEC)	</span><br><span class="line">        sync_in_progress = bioPendingJobsOfType(BIO_AOF_FSYNC) != 0;	</span><br><span class="line">    if (server.aof_fsync == AOF_FSYNC_EVERYSEC &amp;&amp; !force) &#123;	</span><br><span class="line">        if (sync_in_progress) &#123;	</span><br><span class="line">            if (server.aof_flush_postponed_start == 0) &#123;	</span><br><span class="line">                server.aof_flush_postponed_start = server.unixtime;	</span><br><span class="line">                return;	</span><br><span class="line">            &#125; else if (server.unixtime - server.aof_flush_postponed_start &lt; 2) &#123;	</span><br><span class="line">                return;	</span><br><span class="line">            &#125;	</span><br><span class="line">            server.aof_delayed_fsync++;	</span><br><span class="line">        &#125;	</span><br><span class="line">    &#125;	</span><br><span class="line">    //将aof_buf中的内容写入到aof文件	</span><br><span class="line">    nwritten = write(server.aof_fd,server.aof_buf,sdslen(server.aof_buf));	</span><br><span class="line">    server.aof_flush_postponed_start = 0;	</span><br><span class="line">    ……	</span><br><span class="line">    server.aof_current_size += nwritten;	</span><br><span class="line">    if ((sdslen(server.aof_buf)+sdsavail(server.aof_buf)) &lt; 4000) &#123;	</span><br><span class="line">        sdsclear(server.aof_buf);	</span><br><span class="line">    &#125; else &#123;	</span><br><span class="line">        sdsfree(server.aof_buf);	</span><br><span class="line">        server.aof_buf = sdsempty();	</span><br><span class="line">    &#125;	</span><br><span class="line">    //appendfsync为no或者有后台进程在进行aof或rdb，不进行文件同步	</span><br><span class="line">    if (server.aof_no_fsync_on_rewrite &amp;&amp;	</span><br><span class="line">        (server.aof_child_pid != -1 || server.rdb_child_pid != -1))	</span><br><span class="line">            return;	</span><br><span class="line">    /* appendfsync为always */	</span><br><span class="line">    if (server.aof_fsync == AOF_FSYNC_ALWAYS) &#123;/	</span><br><span class="line">        aof_fsync(server.aof_fd); //同步aof文件	</span><br><span class="line">        server.aof_last_fsync = server.unixtime;//记录同步时间	</span><br><span class="line">    &#125; else if ((server.aof_fsync == AOF_FSYNC_EVERYSEC &amp;&amp;	</span><br><span class="line">                server.unixtime &gt; server.aof_last_fsync)) &#123;	</span><br><span class="line">        /* appendfsync为EVERYSEC*/	</span><br><span class="line">        if (!sync_in_progress) aof_background_fsync(server.aof_fd);	</span><br><span class="line">        server.aof_last_fsync = server.unixtime;	</span><br><span class="line">    &#125;	</span><br><span class="line">&#125;	</span><br><span class="line">void aof_background_fsync(int fd) &#123;	</span><br><span class="line">    bioCreateBackgroundJob(BIO_AOF_FSYNC,(void*)(long)fd,NULL,NULL);	</span><br><span class="line">&#125;	</span><br></pre></td></tr></table></figure>
+<p>    可以看到，在方法中，有<code>if (server.aof_fsync == AOF_FSYNC_ALWAYS)</code>的判断，如果条件符合，会使用<code>fdatasync()</code>的方法来写磁盘。	</p>
+<p>        大体就是：先把写命令追加到aof buffer中，下一次进入事件循环循环后，再将buffer写到磁盘上。结合while循环处方法的调用顺序，可以看出确实是这样的。那么也就是说，这次写到磁盘上的内容是上一个事件循环产生的	</p>
+<p>        所以，即使设置为always，也会丢失一个循环的数据。	</p>
+<p>从redis的这种策略上我们也可以看出，redis和mysql在数据持久化之间的区别，redis的数据持久化仅仅就是一个附带功能，并不是其主要功能，但是mysql就不一样，mysql的在数据坚持久化方面就是刚需，最终目的就是让数据成功落盘，不会有任何的丢失和数据一致性问题，因此mysql（innodb存储引擎）在做事务提交的时候会有两阶段提交、日志立即刷盘（当然这和sync_binlog和innodb_flush_log_at_trx_commit配置有关）来确保数据的成功提交，不会丢失。	</p>
+<h1 id="哨兵"><a href="#哨兵" class="headerlink" title="哨兵"></a>哨兵</h1><h1 id="主从集群"><a href="#主从集群" class="headerlink" title="主从集群"></a>主从集群</h1><h2 id="主从集群情况下数据丢失情况"><a href="#主从集群情况下数据丢失情况" class="headerlink" title="主从集群情况下数据丢失情况"></a>主从集群情况下数据丢失情况</h2><p>异步复制导致的数据丢失：数据在 master 还没来得及复制到 slave 就宕机了	</p>
+<p>脑裂导致的数据丢失：master 与其他 salve 断开连接，发生选主，选出新 master 后，client 还不知道，继续向旧 master 发出写请求，当旧 master 与其他节点恢复连接时，就会当做 salve 加入集群，这时候就导致之前 client 写的数据丢失	</p>
+<p>解决以上两种情况redis数据丢失的问题<code>都是靠</code>以下两个参数配置将数据损失降到最低。  	<br><code>min-slaves-to-write x</code>  	<br><code>min-slaves-max-lag y</code>  	<br>(要求y秒内至少有x个slave同步接收到这个数据,比如x&#x3D;1，y&#x3D;10)	</p>
+<figure class="highlight plaintext"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br></pre></td><td class="code"><pre><span class="line">Redist 主从复制的时候,设置以下参数需小心,	</span><br><span class="line">min-slaves-max-lag=10	</span><br><span class="line">min-slaves-to-write=1	</span><br><span class="line">	</span><br><span class="line">当min-slaves-to-write=1时,slave去维护断开的情况下	</span><br><span class="line">主库此时只能读,不能写:	</span><br><span class="line">	</span><br><span class="line">lpush lkey 1 2 3 4	</span><br><span class="line">(error) NOREPLICAS Not enough good slaves to write.	</span><br><span class="line">127.0.0.1:6379&gt; set test 233	</span><br><span class="line">(error) NOREPLICAS Not enough good slaves to write.	</span><br><span class="line">127.0.0.1:6379&gt; get one	</span><br><span class="line">&quot;1&quot;	</span><br><span class="line">	</span><br><span class="line">	</span><br><span class="line">只有一个从库且要去维护的时候,请先设置 最少写从库的个数为0,再去维护从库	</span><br><span class="line">	</span><br><span class="line">127.0.0.1:6379&gt; config set min-slaves-to-write 0	</span><br></pre></td></tr></table></figure>
+<p>减少异步复制的数据丢失	<br>有了min-slaves-max-lag这个配置，就可以确保说，一旦slave复制数据和ack延时太长，就<code>认为</code>可能master宕机后<code>损失</code>的数据<code>太多</code>了，那么就<code>拒绝</code>新的<code>写</code>请求，这样可以把master<code>宕机时</code>由于部分数据未同步到slave导致的数据丢失的损失<code>降低的可控范围内</code>，但是<a target="_blank" rel="noopener" href="https://links.jianshu.com/go?to=https://blog.csdn.net/u011944141/article/details/93775639">仅有一个从库要谨慎设置1,只有一个从库且要去维护的时候,请先设置 最少写从库的个数为0,再去维护从库</a>	<br><img src="/image/article/Redis/20231006211205.png" alt="20231006211205">	</p>
+<p>比如如上图所示，我们如果发现redis slave结点数据同步延迟时间太长，我们就任务主节点挤压了很多数据没有同步，这时候如果宕机的话，redis要丢失很多数据，因此我们先停止新的写入，防止宕机时候丢失的数据更多，于此同时全力进行数据同步，当然我们可以在延迟很高的时候呢做限流降级，也可以把数据丢到mq里，每隔一段时间进行一次消费给他重新回流到redis的机会	</p>
+<p>减少脑裂的数据丢失	<br>如果一个master出现了脑裂，跟其他slave丢了连接，那么上面两个配置可以确保说，如果不能继续给指定数量的slave发送数据，而且slave超过10秒没有给自己ack消息，那么就直接拒绝客户端的写请求	</p>
+<p>这样脑裂后的<strong>旧master就不会接受client的新数据</strong>，也就避免了更多的数据丢失	</p>
+<p>上面的配置就确保了，如果跟任何一个slave（配置的x为所有从结点的数量）丢了连接，在10秒后发现没有slave给自己ack，那么就拒绝新的写请求	</p>
+<p>因此在脑裂场景下，最多就丢失10秒的数据。	</p>
+<p><img src="/image/article/Redis/20231006211237.png" alt="20231006211237">	</p>
+<p>上面两个参数保证了发生脑裂后多长时间停止新的写入，让我们数据丢失的损失降低到最少，这里脑裂状态持续的越久就会丢失越久的数据，因为他重启后会变成从结点，所有数据同步于新的master，原来的数据都丢了	</p>
+<h1 id="切片集群"><a href="#切片集群" class="headerlink" title="切片集群"></a>切片集群</h1><h1 id="bigkey"><a href="#bigkey" class="headerlink" title="bigkey"></a>bigkey</h1><h1 id="服务模型"><a href="#服务模型" class="headerlink" title="服务模型"></a>服务模型</h1><p>redis服务器可以与多个客户端建立连接，客户端将命令请求通过网络传输给服务器。redis服务器从在相应的数据库上执行读写操作。	</p>
+<p>redis服务是通过<strong>单线程单进程</strong>的方式处理客户端的请求。当一个redis客户端与redis服务器建立连接之后，服务器为客户端在服务器内部维护一个<strong>结构体RedisClient</strong>表示客户端状态，这个结构体用于保存<strong>当前客户的上下文信息</strong>。主要就是与客户端建立连接的<strong>套接字描述符</strong>、输入&#x2F;输出缓冲区等与客户端有关的信息。	</p>
+<blockquote>
+<p>套接字描述符属性记录了客户端正在使用的套接字描述符。而输入缓存区用于保存redis客户端向redis服务器发送的命令，输出缓冲区用于保存redis服务器执行完毕命令，待回写到redis客户端的命令。	</p>
+</blockquote>
+<p>redis服务器可以一次性服务多个用户，这些用户使用链表结构组织起来。redis本质上就是一个<strong>事件驱动程序</strong>，可以处理文件事件和时间时间。<strong>文件事件就是服务器对套接字操作的抽象</strong>，因为send和receive本身就可以看作特殊的文件接口，而对端的socket输入缓冲区就是打开的文件。时间时间是需要在给定时间点执行的事件，是<strong>服务器定时操作的抽象</strong>。  	<br>redis的文件处理器是reactor模型，基于事件驱动的。文件事件处理器使用I&#x2F;O多路复用程序可以同时监听多个套接字，并且注册感兴趣的事件，包括accept（连接建立事件）、read（读事件）、write（写事件）、close（关闭事件）、slaveof（主从复制）等	</p>
+<p>Redis单进程线程的架构意思是：从网络IO到实际处理读写事件、时间事件等都是有单个线程基于I&#x2F;O复用完成的。并不是整个redis中只有一个主线程和单一进程。  	<br>Redis 6支持多线程技术，<strong>仅针对处理网络请求的过程采用了多线程，而数据的读写命令仍然采用单线程进行处理</strong>。这里使用多线程IO的原因是在<strong>等待网络IO的时候最大化利用CPU资源</strong>。	</p>
+<blockquote>
+<p>多路复用的IO模型，处理网络请求的时候，select()调用是阻塞的。如果并发量很高的情况下，可能成为瓶颈。多线程可以利用CPU多核的优势，使得多个线程并行。当select()调用返回的时候，请求依次交给多个线程去处理，充分利用CPU多核的优势。	</p>
+</blockquote>
+<p>但是处理事件（执行事件处理器）本身是很快的，不存在CPU瓶颈。而且可以避免线程安全问题。  	<br>虽然多线程模型执行读写事件能够提升并发性能，但是引入了多线程会<strong>使得程序的执行具有不确定性，还会造成额外的切换开销</strong>	</p>
+<blockquote>
+<p>redis基于内存数据库，本身在执行上不存在CPU瓶颈。如果采用多线程反而会增加上下文切换带来的开销，以及线程安全问题，为程序的执行带来不确定性。redis采用I&#x2F;O多路复用模型，使得它可以同时响应多个事件，这极大地提升了I&#x2F;O利用率。另外redis的对象底层根据不同的场景，会使用不同的数据结构进行实现，优化了性能。  	<br><strong>redis真正的瓶颈在于网络带宽和机器内存大小</strong>。	</p>
+</blockquote>
+<p>（redis4.0也支持了多线程技术，主要是用于后台处理包括对象回收、过期键回收等redis服务器部分的时间事件的功能）	</p>
+<h2 id="文件事件"><a href="#文件事件" class="headerlink" title="文件事件"></a>文件事件</h2><p>文件事件处理器由四个部分组成：<strong>套接字、I&#x2F;O多路复用程序、文件事件分派器（dispatcher）、事件处理器（controller）</strong>  	<br>【1】redis客户端与redis服务器建立连接后，redis服务器就会在内存中维护一个redis客户端的对象，并且将redis客户端的套接字注册在I&#x2F;O多路复用程序上  	<br>【2】I&#x2F;O多路复用程序监听这些套接字，一旦有感兴趣的事件发生，就会传输产生了事件的套接字给文件事件分派器（他们通过队列通信，I&#x2F;O复用程序将套接字同步有序的放入<strong>队列</strong>，而分派器则从队列中取出，类似基于生产者消费者模型的阻塞队列）  	<br>【3】分派器根据文件事件的种类，调用相应的事件处理器接口（事件处理函数，例如连接应答、命令请求、命令回复）（可以类比springMVC中的dispatcherSerlet和controller）	</p>
+<p>其中I&#x2F;O多路复用程序底层依赖&#x2F;O复用类库如select、epoll等。	</p>
+<h2 id="时间事件"><a href="#时间事件" class="headerlink" title="时间事件"></a>时间事件</h2><p>时间事件主要分为定时事件和周期事件，一个事件是定时事件还是周期事件取决于时间事件处理器的返回值（redis内部定义的常量值）。服务器会将所有的时间事件存入一个无序的链表。<strong>当时间事件执行器运行的时候，他就遍历整个链表，找到所有已达到的时间事件，并调用相应的事件处理器</strong>。redis作为内存数据库，遍历链表的操作是可以达到常量级别的。  	<br>redis服务器需要定时对自身的资源和状态进行检查和调整，这些定时操作由serverCron函数负责，包括<strong>定期清理过期键值对</strong>、更新记账信息、与从服务器定期同步、<strong>定期持久化操作</strong>等。<strong>正常模式下，redis服务器只运行serverCron一个时间事件，并且是周期事件</strong>。	</p>
+<blockquote>
+<p>serverCron默认每隔100毫秒执行一次，负责管理服务器的资源。包括更新LRU时钟、更新服务器每秒执行命令的次数、更新服务器内存峰值记录、处理kill （15即sig term） 的信号、检查持久化操作的运行状态。  	<br>serverCron函数每次执行的时候，都会调用clientsCron函数管理客户端资源，以及调用databasesCron函数，管理数据库资源	</p>
+</blockquote>
+<p>文件事件和时间时间都是<strong>原子、有序、同步</strong>地执行的，它们都会尽可能少地减少程序的阻塞时间，并且在有需要的时候主动让出执行权。如果执行时间、数据大小超过预设的阈值，通常会留在下一轮事件循环中执行。它们之间是合作关系，服务器会轮流执行这两个事件，并且执行过程不会互相抢占。	</p>
+<h1 id="内存淘汰"><a href="#内存淘汰" class="headerlink" title="内存淘汰"></a>内存淘汰</h1><h1 id="思考"><a href="#思考" class="headerlink" title="思考"></a>思考</h1><h2 id="Redis快的原因"><a href="#Redis快的原因" class="headerlink" title="Redis快的原因"></a>Redis快的原因</h2><ol>
+<li>Redis是纯内存数据库，数据都要内存中，读取数据时不需要进行磁盘IO	</li>
+<li>采用的数据结构，比如hash和skplist	</li>
+<li>利用IO多路复用监听多个套接字，有效减少线程数量和竞争</li>
+</ol>
+<p>	</p>
+<p><a target="_blank" rel="noopener" href="https://www.jianshu.com/p/be4f545130be">Redis为啥这么快?&amp;Redis的线程模型&amp;Redis通讯过程 - 简书 (jianshu.com)</a>	</p>
+<h2 id="热key如何发现与解决"><a href="#热key如何发现与解决" class="headerlink" title="热key如何发现与解决"></a>热key如何发现与解决</h2><p>所谓热key问题就是，突然有几十万的请求去访问redis上的某个特定key。那么，这样会造成流量过于集中，达到物理网卡上限，从而导致这台redis的服务器宕机。  	<br>那接下来这个key的请求，就会直接怼到你的数据库上，导致你的服务不可用。	</p>
+<h3 id="发现"><a href="#发现" class="headerlink" title="发现"></a>发现</h3><p><em>方法一:凭借业务经验，进行预估哪些是热key</em>  	<br>其实这个方法还是挺有可行性的。比如某商品在做秒杀，那这个商品的key就可以判断出是热key。缺点很明显，并非所有业务都能预估出哪些key是热key。  	<br><em>方法二:在客户端进行收集</em>  	<br>这个方式就是在操作redis之前，加入一行代码进行数据统计。那么这个数据统计的方式有很多种，也可以是给外部的通讯系统发送一个通知信息。缺点就是对客户端代码造成入侵。  	<br><em>方法三:在Proxy层做收集</em>  	<br>有些集群架构是下面这样的，Proxy可以是Twemproxy，是统一的入口。可以在Proxy层做收集上报，但是缺点很明显，并非所有的redis集群架构都有proxy。	</p>
+<p><em>方法四:用redis自带命令</em>  	<br>(1)monitor命令，该命令可以实时抓取出redis服务器接收到的命令，然后写代码统计出热key是啥。当然，也有现成的分析工具可以给你使用，比如<code>redis-faina</code>。但是该命令在高并发的条件下，有内存增暴增的隐患，还会降低redis的性能。  	<br>(2)hotkeys参数，redis 4.0.3提供了redis-cli的热点key发现功能，执行redis-cli时加上–hotkeys选项即可。但是该参数在执行的时候，如果key比较多，执行起来比较慢。  	<br><em>方法五:自己抓包评估</em>  	<br>Redis客户端使用TCP协议与服务端进行交互，通信协议采用的是RESP。自己写程序监听端口，按照RESP协议规则解析数据，进行分析。缺点就是开发成本高，维护困难，有丢包可能性。	</p>
+<p>以上五种方案，各有优缺点。根据自己业务场景进行抉择即可	</p>
+<h3 id="解决"><a href="#解决" class="headerlink" title="解决"></a>解决</h3><p><em>(1)利用二级缓存</em>  	<br>比如利用<code>ehcache</code>，或者一个<code>HashMap</code>都可以。在你发现热key以后，把热key加载到系统的JVM中。  	<br>针对这种热key请求，会直接从jvm中取，而不会走到redis层。  	<br>假设此时有十万个针对同一个key的请求过来,如果没有本地缓存，这十万个请求就直接怼到同一台redis上了。  	<br>现在假设，你的应用层有50台机器，OK，你也有jvm缓存了。这十万个请求平均分散开来，每个机器有2000个请求，会从JVM中取到value值，然后返回数据。避免了十万个请求怼到同一台redis上的情形。  	<br><em>(2)备份热key</em>  	<br>这个方案也很简单。不要让key走到同一台redis上不就行了。我们把这个key，在多个redis上都存一份不就好了。接下来，有热key请求进来的时候，我们就在有备份的redis上随机选取一台，进行访问取值，返回数据。  	<br>假设redis的集群数量为N，步骤如下图所示	</p>
+<p><img src="/image/article/Redis/20231006192414.png" alt="20231006192414">	</p>
+<p>注:不一定是2N，你想取3N，4N都可以，看要求。  	<br>伪代码如下	</p>
+<figure class="highlight haskell"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><span class="line"><span class="title">const</span> <span class="type">M</span> = <span class="type">N</span> * <span class="number">2</span>	</span><br><span class="line">//生成随机数	</span><br><span class="line"><span class="title">random</span> = <span class="type">GenRandom</span>(<span class="number">0</span>, <span class="type">M</span>)	</span><br><span class="line">//构造备份新key	</span><br><span class="line"><span class="title">bakHotKey</span> = hotKey + “_” + random	</span><br><span class="line"><span class="class"><span class="keyword">data</span> = redis.<span class="type">GET</span>(<span class="title">bakHotKey</span>)	</span></span><br><span class="line"><span class="title">if</span> <span class="class"><span class="keyword">data</span> == <span class="type">NULL</span> &#123;	</span></span><br><span class="line"><span class="class">    <span class="title">data</span> = <span class="type">GetFromDB</span>()	</span></span><br><span class="line"><span class="class">    <span class="title">redis</span>.<span class="type">SET</span>(<span class="title">bakHotKey</span>, <span class="title">expireTime</span> + <span class="type">GenRandom</span>(0,5))	</span></span><br><span class="line"><span class="class">&#125;	</span></span><br></pre></td></tr></table></figure>
+<p><strong>有办法在项目运行过程中，自动发现热key，然后程序自动处理么？</strong>	</p>
+<p>嗯，好问题，那我们来讲讲业内怎么做的。其实只有两步  	<br>(1)监控热key  	<br>(2)通知系统做处理  	<br>正巧，前几天有赞出了一篇《有赞透明多级缓存解决方案（TMC）》，里头也有提到热点key问题，我们刚好借此说明  	<br><em>(1)监控热key</em>  	<br>在监控热key方面，有赞用的是方式二：<strong>在客户端进行收集</strong>。  	<br>在《有赞透明多级缓存解决方案（TMC）》中有一句话提到	</p>
+<blockquote>
+<p><strong>TMC 对原生jedis包的JedisPool和Jedis类做了改造，在JedisPool初始化过程中集成TMC“热点发现”+“本地缓存”功能Hermes-SDK包的初始化逻辑。</strong>	</p>
+</blockquote>
+<p>也就说人家改写了jedis原生的jar包，加入了Hermes-SDK包。  	<br>那Hermes-SDK包用来干嘛？  	<br>OK，就是做<strong>热点发现</strong>和<strong>本地缓存</strong>。  	<br>从监控的角度看，该包对于Jedis-Client的每次key值访问请求，Hermes-SDK 都会通过其通信模块将key访问事件异步上报给Hermes服务端集群，以便其根据上报数据进行“热点探测”。	</p>
+<p>当然，这只是其中一种方式，有的公司在监控方面用的是方式五:<strong>自己抓包评估</strong>。  	<br>具体是这么做的，先利用flink搭建一套流式计算系统。然后自己写一个抓包程序抓redis监听端口的数据，抓到数据后往kafka里丢。  	<br>接下来，流式计算系统消费kafka里的数据，进行数据统计即可，也能达到监控热key的目的。	</p>
+<p><em>(2)通知系统做处理</em>  	<br>在这个角度，有赞用的是上面的解决方案一:利用二级缓存进行处理。  	<br>有赞在监控到热key后，Hermes服务端集群会通过各种手段通知各业务系统里的Hermes-SDK，告诉他们:”老弟，这个key是热key，记得做本地缓存。”  	<br>于是Hermes-SDK就会将该key缓存在本地，对于后面的请求。Hermes-SDK发现这个是一个热key，直接从本地中拿，而不会去访问集群。	</p>
+<p>除了这种通知方式以外。我们也可以这么做，比如你的流式计算系统监控到热key了，往zookeeper里头的某个节点里写。然后你的业务系统监听该节点，发现节点数据变化了，就代表发现热key。最后往本地缓存里写，也是可以的。	</p>
+<h2 id="如何减少Redis数据丢失问题"><a href="#如何减少Redis数据丢失问题" class="headerlink" title="如何减少Redis数据丢失问题"></a>如何减少Redis数据丢失问题</h2><p>两方面看待这个问题：	</p>
+<ol>
+<li>主从角度看待：主库和从库的同步方式是异步的	</li>
+<li>单个redis实例看待：与redis本身的持久化机制有关</li>
+</ol>
+<p>	</p>
+
+                
+                <p class="end">__END__</p>
+            </div>
+            <div class="article-footer">
+                <div class="suffix-box">
+    <div class="suffix-box-left">
+        <img src="/image/sidebar/avatar.jpg" alt="Live For Code">
+    </div>
+    <div class="suffix-box-right">
+        <span class="suffix-box-title">文章作者：</span>Live For Code
+        <br>
+        <span class="suffix-box-title">文章出处：</span><a href="/article/3135569683/" target="_blank">Redis</a>
+        <br>
+        <span class="suffix-box-title">作者签名：</span>简单地活着, 肆意又精彩.
+        <br>
+        <span class="suffix-box-title">关于主题：</span><a href="https://github.com/first19326/Hexo-LiveForCode" target="_blank">Hexo - Live For Code</a>
+        <br>
+        <span class="suffix-box-title">版权声明：</span>文章除特别声明外，均采用 <a href="https://creativecommons.org/licenses/by-nc-nd/4.0/" title="BY-NC-SA" target="_blank">BY-NC-SA</a> 许可协议，转载请注明出处
+        <br>
+    </div>
+    <div style="clear: both;"></div>
+</div>
+                
+                    <div class="category">
+                        分类：
+                        
+                            <a href="/category/Redis/">Redis</a>
+                        
+                    </div>
+                
+                
+                <div class="article-prev-next">
+                    
+                    
+                        <a href="/article/2566977438/" class="next-prefix">» </a> 下一篇：    <a href="/article/2566977438/" title="发布于 2023-10-04 01:12">图片</a>
+                    
+                </div>
+            </div>
+            
+    <div class="article-comments">
+        
+            <div class="comments-title">
+                评论列表
+            </div>
+        
+        <div class="comments-content"></div>
+    </div>
+    
+ 
+        </div>
+    
+</div>
+    <div id="footer">
+    <div><span class='face'>ღゝ◡╹)ノ♡</span></div><div>【人生若只如初见<span><i class='iconfont icon-like-fill'></i></span>何事秋风悲画扇】</div><div>&copy; 2020-2023 WorstOne. All Rights Reserved.</div>
+</div>
+    <div id="sidebar">
+    <div class="menu-wrap" style="display:none;">
+        
+            <div class="menu-notice">
+                <span class="iconfont icon-notice"></span>
+                <div class="notice">
+                    <span>简单地活着，肆意而又精彩！</span>
+                </div>
+            </div>
+        
+        <nav class="menu">
+            <div class="menu-introduce"> 
+                <div class="introduce-avatar">
+                    <img src="/image/sidebar/avatar.jpg">
+                </div> 
+                <div class="introduce-info"> 
+                    <div class="introduce-user">
+                        
+                            <a href="https://worstone.cn" target="_blank"><span>Live For Code</span></a>
+                        
+                    </div>
+                </div> 
+            </div> 
+            <div class="menu-list">
+                <ul>
+                    
+                        <li class=""><a href="/" class="" target="_self"><span class="iconfont icon-home-fill"></span>首页</a></li>
+                    
+                        <li class=""><a href="/category" class="" target="_self"><span class="iconfont icon-folder-fill"></span>分类</a></li>
+                    
+                        <li class=""><a href="/tag" class="" target="_self"><span class="iconfont icon-discount-fill"></span>标签</a></li>
+                    
+                        <li class=""><a href="/archive" class="" target="_self"><span class="iconfont icon-calendar-fill"></span>归档</a></li>
+                    
+                        <li class=""><a href="/donate" class="" target="_self"><span class="iconfont icon-heart-fill"></span>赞赏</a></li>
+                    
+                        <li class=""><a href="/about" class="" target="_self"><span class="iconfont icon-about-fill"></span>关于</a></li>
+                    
+                        <li class=""><a href="/atom.xml" class="" target="_blank"><span class="iconfont icon-rss"></span>订阅</a></li>
+                    
+                        <li class=""><a href="javascript:;" class="search" target="_self"><span class="iconfont icon-search-menu"></span>搜索</a></li>
+                    
+                        <li class=""><a href="/comment" class="" target="_self"><span class="iconfont icon-comments-fill"></span>留言板</a></li>
+                    
+                        <li class=""><a href="/friend" class="" target="_self"><span class="iconfont icon-link"></span>友情链接</a></li>
+                    
+                </ul> 
+            </div> 
+            <div class="menu-link">
+                <div class="box">
+                    <div class="image-box"></div>
+                </div>
+                
+                    <a name="知乎" href="https://zhihu.com/people/worstone-29" class="" target="_blank" data=""><span class="iconfont icon-zhihu"></span></a>
+                
+                    <a name="微博" href="https://weibo.com/u/5749847477" class="" target="_blank" data=""><span class="iconfont icon-weibo"></span></a>
+                
+                    <a name="QQ" href="javascript:;" class="image" target="_self" data="/image/sidebar/qq.png"><span class="iconfont icon-qq"></span></a>
+                
+                    <a name="微信" href="javascript:;" class="" target="_self" data=""><span class="iconfont icon-wechat"></span></a>
+                
+                    <a name="GitHub" href="https://github.com/first19326" class="" target="_blank" data=""><span class="iconfont icon-github"></span></a>
+                
+            </div> 
+        </nav>
+        <button class="menu-button-close"></button>
+        <div class="morph-shape" id="morph-shape" data-morph-open="M-7.312,0H15c0,0,66,113.339,66,399.5C81,664.006,15,800,15,800H-7.312V0z;M-7.312,0H100c0,0,0,113.839,0,400c0,264.506,0,400,0,400H-7.312V0z">
+            <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 100 800" preserveAspectRatio="none">
+                <path d="M-7.312,0H0c0,0,0,113.839,0,400c0,264.506,0,400,0,400h-7.312V0z"/>
+            </svg>
+        </div>
+    </div>
+    <button class="menu-button-open">MENU</button>
+    <div class="menu-cover"></div>
+</div>
+    <link type="text/css" rel="stylesheet" href="/css/search.css">
+<script type="text/javascript" src="/js/iscroll.js"></script>
+<script type="text/javascript" src="/js/instantsearch.min.js"></script>
+<div class="search-window">
+    <div class="search-content">
+        <div class="search-content-icon">
+            <i class="iconfont icon-search"></i>
+        </div>
+        <div id="search-input" class="search-input"></div>
+    </div>
+
+    <div class="search-scroll">
+        <div class="search-result">
+            <div id="search-stats" class="search-stats"></div>
+            <div id="search-hits"></div>
+            <div id="search-pagination" class="search-pagination"></div>
+        </div>
+    </div>
+
+    <span class="search-close-icon">
+        <i class="iconfont icon-close"></i>
+    </span>
+</div>
+    <div id="tools">
+    <div class="progressbar-top"></div>
+    
+    <link type="text/css" rel="stylesheet" href="/css/APlayer.css">
+    <script type="text/javascript" src="/js/APlayer.min.js"></script>
+    <script type="text/javascript" src="/js/Meting.min.js"></script>
+    <script>
+        var meting_api = 'https://api.i-meto.com/meting/api?server=:server&type=:type&id=:id&auth=:auth&r=:r';
+    </script>
+    <meting-js id="3778678" lrcshow="false" server="netease" type="playlist" fixed="true" autoplay="false" loop="all" order="random" preload="auto" volume="0.67" mutex="true"></meting-js>
+
+    <div class="wrap-right">
+    <div class="wrap-right-hide">
+         <div class="wrap-right-button favorites">
+            <div class="iconbox" switch="false">
+                <span class="iconfont icon-favorites"></span>
+            </div>
+            <span class="icontext">关注</span>
+         </div>
+        <div class="wrap-right-button search">
+            <div class="iconbox">
+                <span class="iconfont icon-search-menu"></span>
+            </div>
+            <span class="icontext">搜索</span>
+        </div>
+        <div class="wrap-right-button menu-button">
+            <div class="iconbox">
+                <span class="iconfont icon-menu"></span>
+            </div>
+            <span class="icontext">菜单</span>
+        </div>
+        <div class="wrap-right-button mode">
+            <div class="light">
+                <div class="iconbox">
+                    <span class="iconfont icon-daymode"></span>
+                </div>
+                <span class="icontext">浅色模式</span>
+            </div>
+            <div class="dark">
+                <div class="iconbox">
+                    <span class="iconfont icon-nightmode-fill"></span>
+                </div>
+                <span class="icontext">深色模式</span>
+            </div>
+        </div>
+        <div class="wrap-right-button bottom">
+            <div class="iconbox">
+                <span class="iconfont icon-top"></span>
+            </div>
+            <span class="icontext">跳至底部</span>
+        </div>
+    </div>
+    <div class="wrap-right-show">
+        <div class="wrap-right-button set">
+            <div class="iconbox">
+                <span class="iconfont icon-setting"></span>
+            </div>
+            <span class="icontext">设置</span>
+        </div>
+        <div class="wrap-right-button top">
+            <div class="iconbox">
+                <span class="iconfont icon-top"></span>
+            </div>
+            <span class="icontext">返回顶部</span>
+        </div>
+    </div>
+</div>
+    <div class="loading"></div>
+</div>
+    <script>
+    window.config = {
+        GitHubUserName     : "first19326",
+        GitHubRepositories : "Hexo-LiveForCode",
+
+        User             : "Live For Code",
+        UserAvatar       : "/image/sidebar/avatar.jpg",
+        WebsiteStartDate : "2020-01-01",
+        Home             : "https://worstone.cn",
+
+        WebsiteTitleBlur         : "(◍´꒳`◍) Hi, Live For Code",
+        WebsiteTitleBlurTimeOut  : 500,
+        WebsiteTitleFocus        : "(*´∇｀*) 欢迎回来!",
+        WebsiteTitleFocusTimeOut : 1000,
+        WebsiteFavicon           : {
+            light : "/image/website/logo/logo.png",
+            dark  : "/image/website/logo/logo-dark.png"
+        },
+
+        ProgressBar : {
+            id       : "topProgressBar",
+            color    : "#77B6FF",
+            height   : "2px",
+            duration : 0.2
+        },
+
+        Loading: {
+            rebound : {
+                tension  : 16,
+                friction : 5
+            },
+            spinner : {
+                id     : "spinner",
+                radius : 90,
+                sides  : 3,
+                depth  : 4,
+                colors : {
+                    background : "#F0F0F0",
+                    stroke     : "#272633",
+                    base       : "",
+                    child      : "#272633"
+                },
+                alwaysForward : true,
+                restAt        : 0.5,
+                renderBase    : false
+            }
+        },
+
+        HomeHeaderAnimationRendered : true,
+        HomeHeaderAnimation         : {
+            radius      : 15,
+            density     : 0.2,
+            color       : "rgba(255, 255, 255, .2)",
+            clearOffset : 0.3
+        },
+
+        BackAnimationRendered          : true,
+        IEBrowserBackAnimationRendered : false,
+        BackAnimation                  : {
+            colorSaturation  : "60%",
+            colorBrightness  : "50%",
+            colorAlpha       : 0.5,
+            colorCycleSpeed  : 5,
+            verticalPosition : "random",
+            horizontalSpeed  : 200,
+            ribbonCount      : 3,
+            strokeSize       : 0,
+            parallaxAmount   : -0.2,
+            animateSections  : true
+        },
+
+        HomeHeaderImage : [
+            
+                "/image/header/home.jpg",
+            
+                "/image/header/home.jpeg",
+            
+        ],
+        HomeBannerText  : "",
+
+        ArticleHeaderImage : [
+            
+                "/image/header/article.jpg",
+            
+        ],
+
+        OtherBannerText : "",
+
+        Error : {
+            icon    : "icon-swimming",
+            title   : "PAGE NOT FOUND",
+            content : [
+                
+                    "很抱歉，您访问的页面不存在！",
+                
+                    "可能是输入地址有误或该地址已变更。",
+                
+            ],
+            buttons : [
+                
+                    {
+                        icon  : "icon-home",
+                        text  : "返回首页",
+                        href  : "/",
+                        class : ""
+                    },
+                
+            ]
+        },
+
+        MenuNotice : {
+            enable : true,
+            notice : "简单地活着，肆意而又精彩！",
+            speed  : 20
+        },
+        MenuList : [
+            
+                {
+                    name   : "首页",
+                    icon   : "icon-home-fill",
+                    href   : "/",
+                    type   : "index",
+                    class  : "",
+                    target : "_self"
+                },
+            
+                {
+                    name   : "分类",
+                    icon   : "icon-folder-fill",
+                    href   : "/category",
+                    type   : "category",
+                    class  : "",
+                    target : "_self"
+                },
+            
+                {
+                    name   : "标签",
+                    icon   : "icon-discount-fill",
+                    href   : "/tag",
+                    type   : "tag",
+                    class  : "",
+                    target : "_self"
+                },
+            
+                {
+                    name   : "归档",
+                    icon   : "icon-calendar-fill",
+                    href   : "/archive",
+                    type   : "archive",
+                    class  : "",
+                    target : "_self"
+                },
+            
+                {
+                    name   : "赞赏",
+                    icon   : "icon-heart-fill",
+                    href   : "/donate",
+                    type   : "donate",
+                    class  : "",
+                    target : "_self"
+                },
+            
+                {
+                    name   : "关于",
+                    icon   : "icon-about-fill",
+                    href   : "/about",
+                    type   : "about",
+                    class  : "",
+                    target : "_self"
+                },
+            
+                {
+                    name   : "订阅",
+                    icon   : "icon-rss",
+                    href   : "/atom.xml",
+                    type   : "",
+                    class  : "",
+                    target : "_blank"
+                },
+            
+                {
+                    name   : "搜索",
+                    icon   : "icon-search-menu",
+                    href   : "javascript:;",
+                    type   : "",
+                    class  : "search",
+                    target : "_self"
+                },
+            
+                {
+                    name   : "留言板",
+                    icon   : "icon-comments-fill",
+                    href   : "/comment",
+                    type   : "comment",
+                    class  : "",
+                    target : "_self"
+                },
+            
+                {
+                    name   : "友情链接",
+                    icon   : "icon-link",
+                    href   : "/friend",
+                    type   : "friend",
+                    class  : "",
+                    target : "_self"
+                },
+            
+        ],
+        MenuLink : [
+            
+                
+                    {
+                        name   : "知乎",
+                        icon   : "icon-zhihu",
+                        href   : "https://zhihu.com/people/worstone-29",
+                        class  : "",
+                        target : "_blank",
+                        image  : ""
+                    },
+                
+                    {
+                        name   : "微博",
+                        icon   : "icon-weibo",
+                        href   : "https://weibo.com/u/5749847477",
+                        class  : "",
+                        target : "_blank",
+                        image  : ""
+                    },
+                
+                    {
+                        name   : "QQ",
+                        icon   : "icon-qq",
+                        href   : "javascript:;",
+                        class  : "image",
+                        target : "_self",
+                        image  : "/image/sidebar/qq.png"
+                    },
+                
+                    {
+                        name   : "微信",
+                        icon   : "icon-wechat",
+                        href   : "javascript:;",
+                        class  : "",
+                        target : "_self",
+                        image  : ""
+                    },
+                
+                    {
+                        name   : "GitHub",
+                        icon   : "icon-github",
+                        href   : "https://github.com/first19326",
+                        class  : "",
+                        target : "_blank",
+                        image  : ""
+                    },
+                
+            
+        ],
+
+        FooterStyle : 2,
+        BottomText  : "<div><span class='face'>ღゝ◡╹)ノ♡</span></div><div>【人生若只如初见<span><i class='iconfont icon-like-fill'></i></span>何事秋风悲画扇】</div><div>&copy; 2020-2023 WorstOne. All Rights Reserved.</div>",
+
+        ConsoleList : [
+            
+                
+                    [
+                        
+                            
+                                "Based on cnblogs theme SimpleMemory.",
+                            
+                                "",
+                            
+                        
+                    ],
+                
+                    [
+                        
+                            
+                                "SimpleMemory Author:",
+                            
+                                "BNDong",
+                            
+                        
+                    ],
+                
+                    [
+                        
+                            
+                                "Theme:",
+                            
+                                "LiveForCode",
+                            
+                        
+                    ],
+                
+            
+        ],
+
+        FontIconExtend : "",
+
+        Donate : {
+            paypal  : "",
+            bitcoin : "",
+            alipay  : "/image/donate/alipay.png",
+            wechat  : "/image/donate/wechat.png"
+        },
+
+        Search : {
+            applicationID : "010C3EANT8",
+            apiKey        : "c7abab9f11b79102b9aff7fe6d41447d",
+            indexName     : "Notes",
+            hits          : {
+                page : 10
+            },
+            labels        : {
+                placeholder : "搜索",
+                empty       : "未发现与 「${query}」 相关的内容",
+                stats       : "${hits} 条相关条目，使用了 ${time} 毫秒",
+            }
+        }, 
+
+        Comment : {
+            switch : true,
+            type   : "Valine",
+        },
+
+        Waline : {
+            el              : ".comments-content",
+            serverURL       : "",
+            path            : window.location.pathname,
+            meta            : "['nick', 'mail', 'link']",
+            requiredMeta    : "['nick', 'mail']",
+            pageSize        : 10,
+            lang            : "zh-cn",
+            locale: {
+                admin       : "博主",
+                anonymous   : "匿名用户",
+                sofa        : "快来做第一个评论的人吧 ~",
+                placeholder : "你是我一生只会遇见一次的惊喜...",
+            },
+            dark            : "html[color-scheme='dark']",
+            search          : false,
+            pageview        : true,
+            comment         : true,
+            copyright       : false,
+        },
+
+        Valine : {
+            el             : ".comments-content",
+            appId          : "srhKtvWPQTWYKh3qX8G8M7v0-gzGzoHsz",
+            appKey         : "8uVSP1q6UlALVC5igYfIfv2h",
+            serverURLs     : "",
+            placeholder    : "你是我一生只会遇见一次的惊喜...",
+            avatar         : "mm",
+            meta           : "nick,mail,link",
+            requiredFields : "nick,mail",
+            pageSize       : 5,
+            lang           : "zh-cn",
+            visitor        : true,
+            enableQQ       : true
+        },
+
+        Tocbot : {
+            switch                : true,
+            tocSelector           : ".toc",
+            contentSelector       : ".article-body",
+            headingSelector       : "h1, h2, h3, h4, h5",
+            headingsOffset        : 0,
+            scrollSmooth          : true,
+            scrollSmoothOffset    : -5,
+            positionFixedSelector : ".toc",
+            positionFixedClass    : "toc-fixed",
+            fixedSidebarOffset    : "",
+        },
+
+        Require : {
+            baseUrl     : "/js/",
+            waitSeconds : 100
+        },
+
+        Music : {
+            type : "Meting"
+        },
+        APlayer : {
+            container : ".aplayer",
+            fixed     : true,
+            autoplay  : false,
+            loop      : "all",
+            order     : "random",
+            preload   : "auto",
+            volume    : 0.67,
+            mutex     : true,
+            lrcType   : 3,
+            audio     : [
+                
+                    {
+                        name   : "Endless Tears",
+                        artist : "CLIFF EDGE",
+                        cover  : "/music/cover/Endless Tears.jpg",
+                        url    : "/music/song/Endless Tears.mp3",
+                        lrc    : "/music/lrc/Endless Tears.lrc"
+                    },
+                
+            ]
+        },
+        Meting : {
+            api      : "https://api.i-meto.com/meting/api",
+            id       : "3778678", 
+            lrcshow  : false, 
+            server   : "netease", 
+            type     : "playlist", 
+            fixed    : true, 
+            autoplay : false, 
+            loop     : "all", 
+            order    : "random", 
+            preload  : "auto", 
+            volume   : 0.67, 
+            mutex    : true
+        },
+
+        Mouse : {
+            enable  : true,
+            options : {
+                size  : 6,
+                sizeF : 24
+            }
+        },
+
+        LazyLoad : {
+            default : "/image/website/lazyload.svg"
+        },
+  
+        Style : {
+            aplayer          : "/css/APlayer.css",
+            archive          : "/css/archive.css",
+            base             : "/css/base.css",
+            clipboard        : "/css/clipboard.css",
+            code             : "/css/code.css",
+            donate           : "/css/donate.css",
+            fancybox         : "/css/jquery.fancybox.css",
+            footer           : "/css/footer.css",
+            iconfont         : "/iconfont/iconfont.css",
+            index            : "/css/index.css",
+            menuBubble       : "/css/menu-bubble.css",
+            mouse            : "/css/mouse.css",
+            page             : "/css/page.css",
+            post             : "/css/post.css",
+            search           : "/css/search.css",
+            tocbot           : "/css/tocbot.css",
+            valine           : "/css/valine.css",
+            waline           : "/css/waline.css",
+            walineCustom     : "/css/waline-custom.css"
+        },
+
+        Script: {
+            aplayer          : "/js/APlayer.min.js",
+            config           : "/js/require.config.js",
+            index            : "/js/index.js",
+            instantSearch    : "/js/instantsearch.min.js",
+            iscroll          : "/js/iscroll.js",
+            jQuery           : "/js/jquery-3.4.1.min.js",
+            loading          : "/js/loading.js",
+            meting           : "/js/Meting.min.js",
+            require          : "/js/require.min.js",
+            waline           : "/js/waline.mjs",
+            pageview         : "/js/pageview.mjs",
+            comment          : "/js/comment.mjs",
+        },
+
+        Font: {
+            LongCang    : "/font/LongCang.css",
+            Monda       : "/font/Monda.css",
+            NotoSansSC  : "/font/NotoSansSC.css",
+            NotoSerifSC : "/font/NotoSerifSC.css",
+            Playball    : "/font/Playball.css",
+            PTMono      : "/font/PTMono.css",
+            Roboto      : "/font/Roboto.css",
+            RobotoSlab  : "/font/RobotoSlab.css",
+            Rosario     : "/font/Rosario.css",
+            UbuntuMono  : "/font/UbuntuMono.css"
+        },
+
+        Suffix : {
+            about : "简单地活着, 肆意又精彩."
+        },
+            
+        Theme : {
+            url  : "https://github.com/first19326/Hexo-LiveForCode",
+            name : "Hexo - Live For Code"
+        }  
+    };
+</script>
+    <script type="text/javascript" src="/js/index.js"></script>
+</body>
+</html>
